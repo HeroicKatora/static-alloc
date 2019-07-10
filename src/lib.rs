@@ -116,11 +116,3 @@ unsafe impl<T> GlobalAlloc for Slab<T> {
     
     unsafe fn dealloc(&self, _ptr: *mut u8, _layout: Layout) {}
 }
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn it_works() {
-        assert_eq!(2 + 2, 4);
-    }
-}
