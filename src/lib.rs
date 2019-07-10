@@ -1,4 +1,4 @@
-//! General purpose allocator(s) with static storage.
+//! General purpose global allocator(s) with static storage.
 //!
 //! Provides an allocator for extremely resource constrained environments where the only memory
 //! guaranteed is your program's image in memory as provided by the loader. Possible use cases are
@@ -20,6 +20,7 @@
 //! }
 //! ```
 
+// Copyright 2019 Andreas Molzer
 #![no_std]
 
 use core::alloc::{GlobalAlloc, Layout};
