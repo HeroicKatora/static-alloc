@@ -97,7 +97,7 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 ///
 /// ## More insights
 ///
-/// [WIP]: May want to wrap moving values into an allocate region into a safe abstraction with
+/// WIP: May want to wrap moving values into an allocate region into a safe abstraction with
 /// correct lifetimes. This would include slices.
 pub struct Slab<T> {
     consumed: AtomicUsize,
@@ -115,6 +115,18 @@ impl<T> Slab<T> {
         Slab {
             consumed: AtomicUsize::new(0),
             storage: UnsafeCell::new(MaybeUninit::uninit()),
+        }
+    }
+
+    /// Make a new allocatable slab of certain byte size and alignment.
+    ///
+    /// The storage will contain zeroed bytes. This is not *yet* available
+    /// as a `const fn` which currently limits its potential usefulness
+    /// but there is no good reason not to provide it regardless.
+    pub fn zeroed() -> Self {
+        Slab {
+            consumed: AtomicUsize::new(0),
+            storage: UnsafeCell::new(MaybeUninit::zeroed()),
         }
     }
 
