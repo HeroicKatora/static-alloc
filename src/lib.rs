@@ -85,7 +85,7 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 ///
 /// fn main() {
 ///     let layout = alloc::Layout::new::<PageTable>();
-///     let memory = Paging.take(layout).unwrap();
+///     let memory = Paging.alloc(layout).unwrap();
 ///     let table = unsafe {
 ///         PageTable::new(memory)
 ///     };
@@ -139,10 +139,16 @@ impl<T> Slab<T> {
             storage: UnsafeCell::new(MaybeUninit::new(storage)),
         }
     }
-}
-    
-impl<T> Slab<T> {
-    pub fn take(&self, layout: Layout) -> Option<*mut u8> {
+
+    /// Allocate a region of memory.
+    ///
+    /// This is a safe alternative to [GlobalAlloc::alloc](#impl-GlobalAlloc).
+    ///
+    /// # Panics
+    /// This function will panic if the requested layout has a size of `0`. For the use in a
+    /// `GlobalAlloc` this is explicitely forbidden to request and would allow any behaviour but we
+    /// instead strictly check it.
+    pub fn alloc(&self, layout: Layout) -> Option<*mut u8> {
         let length = mem::size_of::<T>();
         let base_ptr = self.storage.get()
             as *mut T
@@ -150,6 +156,7 @@ impl<T> Slab<T> {
         
         let alignment = layout.align();
         let requested = layout.size();
+        assert!(requested > 0, "Violated allocation requirement: Requested region of size 0");
         
         // Guess zero, this will fail when we try to access it and it isn't.
         let mut consumed = 0;
@@ -203,7 +210,7 @@ unsafe impl<T> Sync for Slab<T> { }
 
 unsafe impl<T> GlobalAlloc for Slab<T> {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        self.take(layout).unwrap_or_else(null_mut)
+        Slab::alloc(self, layout).unwrap_or_else(null_mut)
     }
     
     unsafe fn dealloc(&self, _ptr: *mut u8, _layout: Layout) {}
