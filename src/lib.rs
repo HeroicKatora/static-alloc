@@ -29,6 +29,76 @@ use core::mem::{self, MaybeUninit};
 use core::ptr::null_mut;
 use core::sync::atomic::{AtomicUsize, Ordering};
 
+/// An allocator whose memory resource has static storage duration.
+///
+/// The type parameter `T` is used mostly to annotate the required size and alignment of the region
+/// and has no futher use. Note that in particular there is no safe way to retrieve or unwrap an
+/// inner instance even if the `Slab` was not constructed as a shared global static.
+///
+/// ## Usage as global allocator
+///
+/// You can use the stable rust attribute to use an instance of this type as the global allocator.
+///
+/// ```rust,no_run
+/// use static_alloc::Slab;
+///
+/// #[global_allocator]
+/// static A: Slab<[u8; 1 << 16]> = Slab::uninit();
+///
+/// fn main() { }
+/// ```
+///
+/// Take care, some runtime features of Rust will allocator some memory before or after your own
+/// code. In particular, it was found to be be tricky to find out more on the usage of the builtin
+/// test framework which seemingly allocates some structures per test.
+///
+/// ## Usage as a (local) bag of bits
+///
+/// It is of course entirely possible to use a local instance instead of a single global allocator.
+/// For example you could utilize the pointer interface directly to build a `#[no_std]` dynamic
+/// data structure in an environment without `extern lib alloc`. This feature was the original
+/// motivation behind the crate but no such data structures are provided here so a quick sketch of
+/// the idea must do:
+///
+/// ```
+/// use core::alloc;
+/// use static_alloc::Slab;
+///
+/// #[repr(align(4096))]
+/// struct PageTable {
+///     // some non-trivial type.
+/// #   _private: [u8; 4096],
+/// }
+///
+/// impl PageTable {
+///     pub unsafe fn new(into: *mut u8) -> &'static mut Self {
+///         // ...
+/// #       &mut *(into as *mut Self)
+///     }
+/// }
+///
+/// // Allocator for pages for page tables. Provides 64 pages. When the
+/// // program/kernel is provided as an ELF the bootloader reserves
+/// // memory for us as part of the loading process that we can use
+/// // purely for page tables. Replaces asm `paging: .BYTE <size>;`
+/// static Paging: Slab<[u8; 1 << 18]> = Slab::uninit();
+///
+/// fn main() {
+///     let layout = alloc::Layout::new::<PageTable>();
+///     let memory = Paging.take(layout).unwrap();
+///     let table = unsafe {
+///         PageTable::new(memory)
+///     };
+/// }
+/// ```
+///
+/// A similar structure would of course work to allocate some non-`'static' objects from a
+/// temporary `Slab`.
+///
+/// ## More insights
+///
+/// [WIP]: May want to wrap moving values into an allocate region into a safe abstraction with
+/// correct lifetimes. This would include slices.
 pub struct Slab<T> {
     consumed: AtomicUsize,
     // Outer unsafe cell due to thread safety.
@@ -38,11 +108,20 @@ pub struct Slab<T> {
 }
 
 impl<T> Slab<T> {
-    /// Make a new allocatable block provided with some bytes it can hand out.
+    /// Make a new allocatable slab of certain byte size and alignment.
     ///
-    /// Note that `storage` will never be dropped and must not contain any 
-    /// uninitialized bytes from padding.
-    pub const unsafe fn new(storage: T) -> Self {
+    /// The storage will contain uninitialized bytes.
+    pub const fn uninit() -> Self {
+        Slab {
+            consumed: AtomicUsize::new(0),
+            storage: UnsafeCell::new(MaybeUninit::uninit()),
+        }
+    }
+
+    /// Make a new allocatable slab provided with some bytes it can hand out.
+    ///
+    /// Note that `storage` will never be dropped and there is no way to get it back.
+    pub const fn new(storage: T) -> Self {
         Slab {
             consumed: AtomicUsize::new(0),
             storage: UnsafeCell::new(MaybeUninit::new(storage)),

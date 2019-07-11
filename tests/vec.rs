@@ -1,9 +1,7 @@
 use static_alloc::Slab;
 
 #[global_allocator]
-static A: Slab<[u8; 1 << 16]> = unsafe {
-    Slab::new([0; 1 << 16])
-};
+static A: Slab<[u8; 1 << 16]> = Slab::uninit();
 
 #[test]
 fn ok_vec() {
