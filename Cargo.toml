@@ -22,3 +22,9 @@ nightly_try_reserve = []
 name = "vec_try"
 path = "tests/vec_try.rs"
 required-features = ["nightly_try_reserve"]
+
+[[test]]
+name = "huuuuuge"
+path = "tests/huuuuuge.rs"
+# Disabled because it chokes rustc. Just a PoC.
+required-features = ["DISABLED"]
