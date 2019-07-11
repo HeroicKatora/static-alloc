@@ -26,10 +26,7 @@ introducing new dependencies and *should* contain no non-optional dependency.
 use static_alloc::Slab;
 
 #[global_allocator]
-static A: Slab<[u8; 1 << 16]> = unsafe {
-    // unsafe block would be obsoleted by const generics
-    Slab::new([0; 1 << 16])
-};
+static A: Slab<[u8; 1 << 16]> = Slab::uninit();
 
 fn main() {
     let v = vec![0xdeadbeef_u32; 128];

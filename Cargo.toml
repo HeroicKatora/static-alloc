@@ -1,6 +1,6 @@
 [package]
 name = "static-alloc"
-version = "0.0.1"
+version = "0.0.2"
 description = "General purpose global allocator(s) with static storage"
 authors = ["Andreas Molzer <andreas.molzer@gmx.de>"]
 edition = "2018"
