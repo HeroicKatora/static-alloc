@@ -1,3 +1,9 @@
+## v0.0.3
+
+- Added `Slab::leak`, a new interface to directly allocate values. Avoid
+  requiring `Box` and `Box::leak` from `alloc` and allows usage a `Slab` with
+  limited lifetime such as on the stack.
+
 ## v0.0.2
 
 - `Slab::take` has been renamed to `Slab::alloc`.

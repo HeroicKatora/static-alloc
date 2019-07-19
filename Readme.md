@@ -29,8 +29,15 @@ use static_alloc::Slab;
 static A: Slab<[u8; 1 << 16]> = Slab::uninit();
 
 fn main() {
+    // Vec occupying `1 << 9` bytes
     let v = vec![0xdeadbeef_u32; 128];
-    println!("{:x?}", v);
+
+    // Can also allocate values directly. Even without `alloc::vec::Vec`.
+    let buffer: &'static mut [u32; 128] = A.leak([0; 128])
+    	.unwrap_or_else(|_| panic!("Runtime allocated too much before main"));
+    buffer.copy_from_slice(&v);
+
+    println!("{:x?}", &buffer[..]);
 }
 ```
 

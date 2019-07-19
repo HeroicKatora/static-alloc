@@ -346,3 +346,21 @@ unsafe impl<T> GlobalAlloc for Slab<T> {
 
     unsafe fn dealloc(&self, _ptr: *mut u8, _layout: Layout) {}
 }
+
+// Can't use the macro-call itself within the `doc` attribute. So force it to eval it as part of
+// the macro invocation.
+// 
+// The inspiration for the macro and implementation is from
+// <https://github.com/GuillaumeGomez/doc-comment>
+//
+// MIT License
+//
+// Copyright (c) 2018 Guillaume Gomez
+macro_rules! insert_as_doc {
+    { $content:expr } => {
+        #[doc = $content] extern { }
+    }
+}
+
+// Provides the README.md as doc, to ensure the example works!
+insert_as_doc!(include_str!("../Readme.md"));
