@@ -37,3 +37,11 @@ fn heterogeneous() {
 
     assert!(slab.leak(0_u8).is_err());
 }
+
+#[test]
+fn zst() {
+    let slab = Slab::<()>::uninit();
+
+    slab.leak::<()>(())
+        .expect("Could 'allocate' zst in no space");
+}

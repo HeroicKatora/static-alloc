@@ -310,9 +310,16 @@ impl<T> Slab<T> {
     /// [`ptr::slice_from_raw_parts`]: https://github.com/rust-lang/rust/issues/36925
     /// [`ManuallyDrop::drop`]: https://doc.rust-lang.org/beta/std/mem/struct.ManuallyDrop.html#method.drop
     pub fn leak<V>(&self, val: V) -> Result<&mut V, NewError<V>> {
-        let ptr = match self.alloc(Layout::new::<V>()) {
-            Some(ptr) => ptr.as_ptr() as *mut V,
-            None => return Err(NewError::new(val)),
+        let ptr = if mem::size_of::<V>() == 0 {
+            let ptr = NonNull::<V>::dangling().as_ptr();
+            // SAFETY: RawVec does this as well. Probably safe, only zero offsets in gep-inbounds.
+            // See https://github.com/rust-lang/unsafe-code-guidelines/issues/93
+            return Ok(unsafe { &mut *ptr })
+        } else {
+            match self.alloc(Layout::new::<V>()) {
+                Some(ptr) => ptr.as_ptr() as *mut V,
+                None => return Err(NewError::new(val)),
+            }
         };
 
         unsafe {
