@@ -142,10 +142,14 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 /// WIP: May want to wrap moving values into an allocate region into a safe abstraction with
 /// correct lifetimes. This would include slices.
 pub struct Slab<T> {
+    /// An monotonic atomic counter of consumed bytes.
+    ///
+    /// It is only mutably accessed in `bump` which guarantees its invariants.
     consumed: AtomicUsize,
-    // Outer unsafe cell due to thread safety.
-    // Inner MaybeUninit because we padding may destroy initialization invariant
-    // on the bytes themselves, and hence drop etc must not assumed inited.
+
+    /// Outer unsafe cell due to thread safety.
+    /// Inner MaybeUninit because we padding may destroy initialization invariant
+    /// on the bytes themselves, and hence drop etc must not assumed inited.
     storage: UnsafeCell<MaybeUninit<T>>,
 }
 
@@ -153,6 +157,26 @@ pub struct Slab<T> {
 #[derive(Debug)]
 pub struct NewError<T> {
     val: T,
+}
+
+enum NewAllocation {
+    Ok {
+        /// Pointer to the region with specified layout.
+        ptr: NonNull<u8>,
+
+        /// The new number of consumed bytes.
+        _consumed: usize,
+    },
+
+    /// No space left for that allocation.
+    Exhausted,
+
+    /// The allocation would not have used the expected base location.
+    ///
+    /// Reports the location that was observed.
+    Mismatch {
+        observed: usize,
+    },
 }
 
 impl<T> Slab<T> {
@@ -197,6 +221,29 @@ impl<T> Slab<T> {
     /// `GlobalAlloc` this is explicitely forbidden to request and would allow any behaviour but we
     /// instead strictly check it.
     pub fn alloc(&self, layout: Layout) -> Option<NonNull<u8>> {
+        assert!(layout.size() > 0, "Violated allocation requirement: Requested region of size 0");
+
+        // Guess zero, this will fail when we try to access it and it isn't.
+        let mut consumed = 0;
+        loop {
+            match self.try_alloc(layout, consumed) {
+                NewAllocation::Ok { ptr, .. } => return Some(ptr),
+                NewAllocation::Exhausted => return None,
+                NewAllocation::Mismatch{ observed } => consumed = observed,
+            }
+        }
+    }
+
+    /// Try to allocate some layout with a precise base location.
+    ///
+    /// The base location is the currently consumed byte count, without correction for the
+    /// alignment of the allocation. This will succeed if it can be allocate exactly at the
+    /// expected location.
+    ///
+    /// # Panics
+    /// This function panics if `expect_consumed` is larger than `length`.
+    fn try_alloc(&self, layout: Layout, expect_consumed: usize) -> NewAllocation {
+        assert!(layout.size() > 0);
         let length = mem::size_of::<T>();
         let base_ptr = self.storage.get()
             as *mut T
@@ -204,51 +251,48 @@ impl<T> Slab<T> {
 
         let alignment = layout.align();
         let requested = layout.size();
-        assert!(requested > 0, "Violated allocation requirement: Requested region of size 0");
 
-        // Guess zero, this will fail when we try to access it and it isn't.
-        let mut consumed = 0;
-        loop {
-            // Holds due to the stores below.
-            let available = length.checked_sub(consumed).unwrap();
-            let ptr_to = base_ptr.wrapping_add(consumed);
-            let offset = ptr_to.align_offset(alignment);
+        // Ensure no overflows when calculating offets within.
+        assert!(expect_consumed <= length);
 
-            if requested > available.saturating_sub(offset) {
-                return None; // exhausted
-            }
+        let available = length.checked_sub(expect_consumed).unwrap();
+        let ptr_to = base_ptr.wrapping_add(expect_consumed);
+        let offset = ptr_to.align_offset(alignment);
 
-            // `size` can not be zero, saturation will thus always make this true.
-            assert!(offset < available);
-            let at_aligned = consumed.checked_add(offset).unwrap();
-            let allocated = at_aligned.checked_add(requested).unwrap();
-            // allocated
-            //    = consumed + offset + requested  [lines above]
-            //   <= consumed + available  [bail out: exhausted]
-            //   <= length  [first line of loop]
-            // So it's ok to store `allocated` into `consumed`.
-            assert!(allocated <= length);
-            assert!(at_aligned < length);
+        if requested > available.saturating_sub(offset) {
+            return NewAllocation::Exhausted; // exhausted
+        }
 
-            // Try to actually allocate. Here we may store `allocated`.
-            let observed = self.consumed.compare_and_swap(
-                consumed,
-                allocated,
-                Ordering::SeqCst);
+        // `size` can not be zero, saturation will thus always make this true.
+        assert!(offset < available);
+        let at_aligned = expect_consumed.checked_add(offset).unwrap();
+        let new_consumed = at_aligned.checked_add(requested).unwrap();
+        // new_consumed
+        //    = consumed + offset + requested  [lines above]
+        //   <= consumed + available  [bail out: exhausted]
+        //   <= length  [first line of loop]
+        // So it's ok to store `allocated` into `consumed`.
+        assert!(new_consumed <= length);
+        assert!(at_aligned < length);
 
-            if observed != consumed {
-                // Someone else was faster, recalculate again.
-                consumed = observed;
-                continue;
-            }
+        // Try to actually allocate.
+        match self.bump(expect_consumed, new_consumed) {
+            Ok(()) => (),
+            Err(observed) => {
+                // Someone else was faster, if you want it then recalculate again.
+                return NewAllocation::Mismatch { observed };
+            },
+        }
 
-            let aligned = unsafe {
-                // SAFETY:
-                // * `0 <= at_aligned < length` in bounds as checked above.
-                (base_ptr as *mut u8).add(at_aligned)
-            };
+        let aligned = unsafe {
+            // SAFETY:
+            // * `0 <= at_aligned < length` in bounds as checked above.
+            (base_ptr as *mut u8).add(at_aligned)
+        };
 
-            return Some(NonNull::new(aligned).unwrap());
+        NewAllocation::Ok {
+            ptr: NonNull::new(aligned).unwrap(),
+            _consumed: new_consumed,
         }
     }
 
@@ -327,6 +371,34 @@ impl<T> Slab<T> {
             ptr::write(ptr, val);
             // SAFETY: ptr points into `self`, and reference is unique.
             Ok(&mut *ptr)
+        }
+    }
+
+    /// Try to bump the monotonic, atomic consume counter.
+    ///
+    /// This is the only place modifying `self.consumed`.
+    ///
+    /// Returns `Ok` if the consume counter was as expected. Monotonicty and atomicity guarantees
+    /// to the caller that no overlapping range can succeed as well. This allocates the range to
+    /// the caller.
+    ///
+    /// Returns the observed consume counter in an `Err` if it was not as expected.
+    ///
+    /// ## Panics
+    /// This function panics if either argument exceeds the byte length of the underlying memory.
+    /// It also panics if the expected value is larger than the new value.
+    fn bump(&self, expect_consumed: usize, new_consumed: usize) -> Result<(), usize> {
+        assert!(expect_consumed <= new_consumed);
+        assert!(new_consumed <= mem::size_of::<T>());
+
+        let observed = self.consumed.compare_and_swap(
+            expect_consumed,
+            new_consumed,
+            Ordering::SeqCst);
+        if expect_consumed == observed {
+            Ok(())
+        } else {
+            Err(observed)
         }
     }
 }
