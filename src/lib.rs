@@ -21,9 +21,9 @@
 // Copyright 2019 Andreas Molzer
 #![no_std]
 
-mod slab;
+pub mod slab;
 
-pub use slab::{Allocation, Failure, Level, NewError, Slab};
+pub use crate::slab::Slab;
 
 // Can't use the macro-call itself within the `doc` attribute. So force it to eval it as part of
 // the macro invocation.
