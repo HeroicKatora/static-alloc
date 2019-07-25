@@ -463,9 +463,13 @@ impl<T> Slab<T> {
     }
 
     /// 'Allocate' a ZST.
-    fn zst_fake_alloc<Z>(&self, _: Z) -> &mut Z {
+    fn zst_fake_alloc<Z>(&self, val: Z) -> &mut Z {
         assert_eq!(mem::size_of::<Z>(), 0);
         let ptr = NonNull::<Z>::dangling().as_ptr();
+
+        // SAFETY: The pointer is suitably aligned and non-zero.
+        // This is equivalent to `mem::forget` but semantically more sensible.
+        unsafe { ptr::write(ptr, val); }
 
         // SAFETY: RawVec does this as well. Probably safe, only zero offsets in gep-inbounds.
         // See https://github.com/rust-lang/unsafe-code-guidelines/issues/93
@@ -526,4 +530,24 @@ unsafe impl<T> GlobalAlloc for Slab<T> {
     }
 
     unsafe fn dealloc(&self, _ptr: *mut u8, _layout: Layout) {}
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn zst_no_drop() {
+        #[derive(Debug)]
+        struct PanicOnDrop;
+
+        impl Drop for PanicOnDrop {
+            fn drop(&mut self) {
+                panic!("No instance of this should ever get dropped");
+            }
+        }
+
+        let alloc = Slab::<()>::uninit();
+        let _ = alloc.leak(PanicOnDrop).unwrap();
+    }
 }
