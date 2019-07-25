@@ -32,6 +32,10 @@
 #![no_std]
 
 pub mod slab;
+mod uninit;
+mod vec;
+
+use uninit::Uninit;
 
 pub use crate::slab::Slab;
 

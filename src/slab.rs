@@ -4,6 +4,8 @@ use core::mem::{self, MaybeUninit};
 use core::ptr::{self, NonNull, null_mut};
 use core::sync::atomic::{AtomicUsize, Ordering};
 
+use super::Uninit;
+
 /// An allocator drawing from an inner, statically sized memory resource.
 ///
 /// The type parameter `T` is used only to annotate the required size and alignment of the region
@@ -230,6 +232,11 @@ pub struct Allocation {
     pub level: Level,
 }
 
+struct UninitAlloc<'a> {
+    uninit: Uninit<'a, ()>,
+    level: Level,
+}
+
 /// Reason for a failed allocation at an exact [`Level`].
 ///
 /// [`Level`]: struct.Level.html
@@ -290,17 +297,7 @@ impl<T> Slab<T> {
     /// `GlobalAlloc` this is explicitely forbidden to request and would allow any behaviour but we
     /// instead strictly check it.
     pub fn alloc(&self, layout: Layout) -> Option<NonNull<u8>> {
-        assert!(layout.size() > 0, "Violated allocation requirement: Requested region of size 0");
-
-        // Guess zero, this will fail when we try to access it and it isn't.
-        let mut consumed = 0;
-        loop {
-            match self.try_alloc(layout, consumed) {
-                Ok(Allocation { ptr, .. }) => return Some(ptr),
-                Err(Failure::Exhausted) => return None,
-                Err(Failure::Mismatch{ observed }) => consumed = observed.0,
-            }
-        }
+        Some(self.try_alloc(layout)?.uninit.as_non_null().cast())
     }
 
     /// Try to allocate some layout with a precise base location.
@@ -314,7 +311,21 @@ impl<T> Slab<T> {
     pub fn alloc_at(&self, layout: Layout, level: Level)
         -> Result<Allocation, Failure>
     {
-        self.try_alloc(layout, level.0)
+        let UninitAlloc { uninit, level } = self.try_alloc_at(layout, level.0)?;
+
+        Ok(Allocation {
+            ptr: uninit.as_non_null().cast(),
+            level,
+        })
+    }
+
+    fn get<V>(&self) -> Option<Uninit<V>> {
+        let layout = Layout::new::<V>();
+        assert!(layout.size() > 0, "Violated allocation requirement: Requested region of size 0");
+
+        let UninitAlloc { uninit, level: _, } = self.try_alloc(layout)?;
+        // UNWRAP: it has exactly the requested size of `V`.
+        Some(uninit.cast().ok().unwrap())
     }
 
     /// Observe the current level.
@@ -327,6 +338,20 @@ impl<T> Slab<T> {
         Level(self.consumed.load(Ordering::SeqCst))
     }
 
+    fn try_alloc(&self, layout: Layout)
+        -> Option<UninitAlloc<'_>>
+    {
+        // Guess zero, this will fail when we try to access it and it isn't.
+        let mut consumed = 0;
+        loop {
+            match self.try_alloc_at(layout, consumed) {
+                Ok(alloc) => return Some(alloc),
+                Err(Failure::Exhausted) => return None,
+                Err(Failure::Mismatch{ observed }) => consumed = observed.0,
+            }
+        }
+    }
+
     /// Try to allocate some layout with a precise base location.
     ///
     /// The base location is the currently consumed byte count, without correction for the
@@ -335,8 +360,8 @@ impl<T> Slab<T> {
     ///
     /// # Panics
     /// This function panics if `expect_consumed` is larger than `length`.
-    fn try_alloc(&self, layout: Layout, expect_consumed: usize)
-        -> Result<Allocation, Failure>
+    fn try_alloc_at(&self, layout: Layout, expect_consumed: usize)
+        -> Result<UninitAlloc<'_>, Failure>
     {
         assert!(layout.size() > 0);
         let length = mem::size_of::<T>();
@@ -385,8 +410,14 @@ impl<T> Slab<T> {
             (base_ptr as *mut u8).add(at_aligned)
         };
 
-        Ok(Allocation {
-            ptr: NonNull::new(aligned).unwrap(),
+        let ptr = NonNull::new(aligned).unwrap();
+        let uninit = unsafe {
+            // SAFETY: memory is valid and unaliased for the lifetime of our reference.
+            Uninit::from_memory(ptr.cast(), requested)
+        };
+
+        Ok(UninitAlloc {
+            uninit,
             level: Level(new_consumed),
         })
     }
