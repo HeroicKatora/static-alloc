@@ -1,6 +1,6 @@
 use core::num::NonZeroU16;
 
-use static_alloc::Slab;
+use static_alloc::{Slab, slab};
 
 #[test]
 fn homogeneous() {
@@ -44,4 +44,25 @@ fn zst() {
 
     slab.leak::<()>(())
         .expect("Could 'allocate' zst in no space");
+}
+
+#[test]
+fn level() {
+    let slab = Slab::<[u16; 2]>::uninit();
+    let init = slab.level();
+
+    let (intu16, level) = slab.leak_at(0u16, init).unwrap();
+    assert_eq!(*intu16, 0);
+    assert!(init < level);
+    assert_eq!(slab.level(), level);
+
+    // Can not get the same level again.
+    assert_eq!(slab.leak_at(0u16, init).unwrap_err().kind(),
+        slab::Failure::Mismatch { observed: level });
+
+    let (othu16, next) = slab.leak_at(10u16, level).unwrap();
+    assert_eq!(*othu16, 10);
+    assert!(init < next);
+    assert!(level < next);
+    assert_eq!(slab.level(), next);
 }

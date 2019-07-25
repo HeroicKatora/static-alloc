@@ -116,6 +116,13 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 ///
 /// ## More insights
 ///
+/// The ordering used is currently `SeqCst`. This enforces a single global sequence of observed
+/// effects on the slab level. The author is fully aware that this is not strictly necessary. In
+/// fact, even `AcqRel` may not be required as the monotonic bump allocator does not synchronize
+/// other memory itself. If you bring forward a PR with a formalized reasoning for relaxing the
+/// requirements to `Relaxed` (llvm `Monotonic`) it will be greatly appreciated (even more if you
+/// demonstrate performance gains).
+///
 /// WIP: slices.
 pub struct Slab<T> {
     /// An monotonic atomic counter of consumed bytes.
@@ -133,6 +140,7 @@ pub struct Slab<T> {
 #[derive(Debug)]
 pub struct NewError<T> {
     val: T,
+    failure: Failure,
 }
 
 /// A specific amount of consumed space of a slab.
@@ -160,6 +168,7 @@ pub struct Allocation {
 /// Reason for a failed allocation at an exact level.
 ///
 /// See [`Level`](./struct.level.html) for details.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Failure {
     /// No space left for that allocation.
     Exhausted,
@@ -168,7 +177,7 @@ pub enum Failure {
     ///
     /// Reports the location that was observed.
     Mismatch {
-        observed: usize,
+        observed: Level,
     },
 }
 
@@ -222,7 +231,7 @@ impl<T> Slab<T> {
             match self.try_alloc(layout, consumed) {
                 Ok(Allocation { ptr, .. }) => return Some(ptr),
                 Err(Failure::Exhausted) => return None,
-                Err(Failure::Mismatch{ observed }) => consumed = observed,
+                Err(Failure::Mismatch{ observed }) => consumed = observed.0,
             }
         }
     }
@@ -239,6 +248,16 @@ impl<T> Slab<T> {
         -> Result<Allocation, Failure>
     {
         self.try_alloc(layout, level.0)
+    }
+
+    /// Observe the current level.
+    ///
+    /// Keep in mind that concurrent usage of the same slab may modify the level before you are
+    /// able to use it in `alloc_at`. Calling this method provides also no other guarantees on
+    /// synchronization of memory accesses, only that the values observed by the caller are a
+    /// monotonically increasing seequence.
+    pub fn level(&self) -> Level {
+        Level(self.consumed.load(Ordering::SeqCst))
     }
 
     /// Try to allocate some layout with a precise base location.
@@ -289,7 +308,7 @@ impl<T> Slab<T> {
             Ok(()) => (),
             Err(observed) => {
                 // Someone else was faster, if you want it then recalculate again.
-                return Err(Failure::Mismatch { observed });
+                return Err(Failure::Mismatch { observed: Level(observed) });
             },
         }
 
@@ -371,7 +390,7 @@ impl<T> Slab<T> {
         } else {
             match self.alloc(Layout::new::<V>()) {
                 Some(ptr) => ptr.as_ptr() as *mut V,
-                None => return Err(NewError::new(val)),
+                None => return Err(NewError::new(val, Failure::Exhausted)),
             }
         };
 
@@ -380,6 +399,39 @@ impl<T> Slab<T> {
             ptr::write(ptr, val);
             // SAFETY: ptr points into `self`, and reference is unique.
             Ok(&mut *ptr)
+        }
+    }
+
+    pub fn leak_at<V>(&self, val: V, level: Level)
+        -> Result<(&mut V, Level), NewError<V>>
+    {
+        if mem::size_of::<V>() == 0 {
+            let observed = self.level();
+
+            if level != observed {
+                return Err(NewError::new(val, Failure::Mismatch {
+                    observed,
+                }));
+            }
+
+            let ptr = NonNull::<V>::dangling().as_ptr();
+            // SAFETY: RawVec does this as well. Probably safe, only zero offsets in gep-inbounds.
+            // See https://github.com/rust-lang/unsafe-code-guidelines/issues/93
+            return Ok((unsafe { &mut *ptr }, level))
+        }
+
+        let alloc = match self.alloc_at(Layout::new::<V>(), level) {
+            Ok(alloc) => alloc,
+            Err(err) => return Err(NewError::new(val, err)),
+        };
+
+        let ptr = alloc.ptr.as_ptr() as *mut V;
+
+        unsafe {
+            // SAFETY: ptr is valid for write, non-null, aligned according to V's layout.
+            ptr::write(ptr, val);
+            // SAFETY: ptr points into `self`, and reference is unique.
+            Ok((&mut *ptr, alloc.level))
         }
     }
 
@@ -413,8 +465,12 @@ impl<T> Slab<T> {
 }
 
 impl<T> NewError<T> {
-    pub fn new(val: T) -> Self {
-        NewError { val, }
+    fn new(val: T, failure: Failure) -> Self {
+        NewError { val, failure, }
+    }
+
+    pub fn kind(&self) -> Failure {
+        self.failure
     }
 
     pub fn into_inner(self) -> T {
