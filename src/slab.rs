@@ -135,15 +135,32 @@ pub struct NewError<T> {
     val: T,
 }
 
-enum NewAllocation {
-    Ok {
-        /// Pointer to the region with specified layout.
-        ptr: NonNull<u8>,
+/// A specific amount of consumed space of a slab.
+///
+/// Each allocation of the `Slab` increases the current level as they must not be empty. By
+/// ensuring that an allocation is performed at a specific level it is thus possible to check that
+/// multiple allocations happened in succession without other intermediate allocations. This
+/// ability in turns makes it possible to group allocations together, for example to initialize a
+/// struct member-by-member or to extend a slice.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Level(usize);
 
-        /// The new number of consumed bytes.
-        _consumed: usize,
-    },
+/// An allocation and current usage level.
+///
+/// See [`Level`](./struct.level.html) for details.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Allocation {
+    /// Pointer to the region with specified layout.
+    pub ptr: NonNull<u8>,
 
+    /// The observed amount of consumed bytes.
+    pub level: Level,
+}
+
+/// Reason for a failed allocation at an exact level.
+///
+/// See [`Level`](./struct.level.html) for details.
+pub enum Failure {
     /// No space left for that allocation.
     Exhausted,
 
@@ -203,9 +220,9 @@ impl<T> Slab<T> {
         let mut consumed = 0;
         loop {
             match self.try_alloc(layout, consumed) {
-                NewAllocation::Ok { ptr, .. } => return Some(ptr),
-                NewAllocation::Exhausted => return None,
-                NewAllocation::Mismatch{ observed } => consumed = observed,
+                Ok(Allocation { ptr, .. }) => return Some(ptr),
+                Err(Failure::Exhausted) => return None,
+                Err(Failure::Mismatch{ observed }) => consumed = observed,
             }
         }
     }
@@ -217,8 +234,24 @@ impl<T> Slab<T> {
     /// expected location.
     ///
     /// # Panics
+    /// This function may panic if the provided `level` is from a different slab.
+    pub fn alloc_at(&self, layout: Layout, level: Level)
+        -> Result<Allocation, Failure>
+    {
+        self.try_alloc(layout, level.0)
+    }
+
+    /// Try to allocate some layout with a precise base location.
+    ///
+    /// The base location is the currently consumed byte count, without correction for the
+    /// alignment of the allocation. This will succeed if it can be allocate exactly at the
+    /// expected location.
+    ///
+    /// # Panics
     /// This function panics if `expect_consumed` is larger than `length`.
-    fn try_alloc(&self, layout: Layout, expect_consumed: usize) -> NewAllocation {
+    fn try_alloc(&self, layout: Layout, expect_consumed: usize)
+        -> Result<Allocation, Failure>
+    {
         assert!(layout.size() > 0);
         let length = mem::size_of::<T>();
         let base_ptr = self.storage.get()
@@ -236,7 +269,7 @@ impl<T> Slab<T> {
         let offset = ptr_to.align_offset(alignment);
 
         if requested > available.saturating_sub(offset) {
-            return NewAllocation::Exhausted; // exhausted
+            return Err(Failure::Exhausted); // exhausted
         }
 
         // `size` can not be zero, saturation will thus always make this true.
@@ -256,7 +289,7 @@ impl<T> Slab<T> {
             Ok(()) => (),
             Err(observed) => {
                 // Someone else was faster, if you want it then recalculate again.
-                return NewAllocation::Mismatch { observed };
+                return Err(Failure::Mismatch { observed });
             },
         }
 
@@ -266,10 +299,10 @@ impl<T> Slab<T> {
             (base_ptr as *mut u8).add(at_aligned)
         };
 
-        NewAllocation::Ok {
+        Ok(Allocation {
             ptr: NonNull::new(aligned).unwrap(),
-            _consumed: new_consumed,
-        }
+            level: Level(new_consumed),
+        })
     }
 
     /// Allocate a value for the lifetime of the allocator.

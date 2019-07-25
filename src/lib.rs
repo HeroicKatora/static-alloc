@@ -23,7 +23,7 @@
 
 mod slab;
 
-pub use slab::{NewError, Slab};
+pub use slab::{Allocation, Failure, Level, NewError, Slab};
 
 // Can't use the macro-call itself within the `doc` attribute. So force it to eval it as part of
 // the macro invocation.
