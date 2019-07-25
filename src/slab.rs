@@ -529,7 +529,9 @@ unsafe impl<T> GlobalAlloc for Slab<T> {
             .unwrap_or_else(null_mut)
     }
 
-    unsafe fn dealloc(&self, _ptr: *mut u8, _layout: Layout) {}
+    unsafe fn dealloc(&self, _ptr: *mut u8, _layout: Layout) {
+        // We are a slab allocator and do not deallocate.
+    }
 }
 
 #[cfg(test)]
