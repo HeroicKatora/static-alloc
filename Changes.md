@@ -1,3 +1,10 @@
+## v0.0.4
+
+- Fixed a bug where ZSTs had their Drop impl executed while leaking them
+- Provides a new interface: `level`, `alloc_at` and `leak_at`. It ensures that
+  an allocation is the first allocation to happen after a particular point in
+  time, and no other allocation is placed between it and the preceding one.
+
 ## v0.0.3
 
 - Added `Slab::leak`, a new interface to directly allocate values. Avoid
