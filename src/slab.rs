@@ -90,6 +90,7 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 /// }
 ///
 /// impl PageTable {
+///     /// Avoid stack allocation of the full struct.
 ///     pub unsafe fn new(into: *mut u8) -> &'static mut Self {
 ///         // ...
 /// #       &mut *(into as *mut Self)
@@ -175,8 +176,10 @@ pub enum Failure {
 
     /// The allocation would not have used the expected base location.
     ///
-    /// Reports the location that was observed.
+    /// Reports the location that was observed. When only levels from the same slab are used (which
+    /// should normally be the case) then the observed level is monotonically increasing.
     Mismatch {
+        /// The observed level that was different from the requested one.
         observed: Level,
     },
 }
@@ -383,10 +386,7 @@ impl<T> Slab<T> {
     /// [`ManuallyDrop::drop`]: https://doc.rust-lang.org/beta/std/mem/struct.ManuallyDrop.html#method.drop
     pub fn leak<V>(&self, val: V) -> Result<&mut V, NewError<V>> {
         let ptr = if mem::size_of::<V>() == 0 {
-            let ptr = NonNull::<V>::dangling().as_ptr();
-            // SAFETY: RawVec does this as well. Probably safe, only zero offsets in gep-inbounds.
-            // See https://github.com/rust-lang/unsafe-code-guidelines/issues/93
-            return Ok(unsafe { &mut *ptr })
+            return Ok(self.zst_fake_alloc(val));
         } else {
             match self.alloc(Layout::new::<V>()) {
                 Some(ptr) => ptr.as_ptr() as *mut V,
@@ -402,6 +402,36 @@ impl<T> Slab<T> {
         }
     }
 
+    /// Allocate a value with a precise location.
+    ///
+    /// See [`leak`] for basics on allocation of values.
+    ///
+    /// The level is an identifer for a base location (more at [`level`]). This will succeed if it
+    /// can be allocate exactly at the expected location.
+    ///
+    /// This method will return the new level of the slab allocator. A next allocation at the
+    /// returned level will be placed next to this allocation, only separated by necessary padding
+    /// from alignment. In particular, this is the same strategy as applied for the placement of
+    /// `#[repr(C)]` struct members. (Except for the final padding at the last member to the full
+    /// struct alignment.)
+    ///
+    /// ## Usage
+    ///
+    /// ```
+    /// use static_alloc::Slab;
+    ///
+    /// let local: Slab<[u64; 3]> = Slab::uninit();
+    ///
+    /// let base = local.level();
+    /// let (one, level) = local.leak_at(1_u64, base).unwrap();
+    /// // Will panic when an allocation happens in between.
+    /// let (two, _) = local.leak_at(2_u64, level).unwrap();
+    ///
+    /// assert_eq!((one as *const u64).wrapping_offset(1), two);
+    /// ```
+    ///
+    /// [`leak`]: #method.leak
+    /// [`level`]: #method.level
     pub fn leak_at<V>(&self, val: V, level: Level)
         -> Result<(&mut V, Level), NewError<V>>
     {
@@ -414,10 +444,7 @@ impl<T> Slab<T> {
                 }));
             }
 
-            let ptr = NonNull::<V>::dangling().as_ptr();
-            // SAFETY: RawVec does this as well. Probably safe, only zero offsets in gep-inbounds.
-            // See https://github.com/rust-lang/unsafe-code-guidelines/issues/93
-            return Ok((unsafe { &mut *ptr }, level))
+            return Ok((self.zst_fake_alloc(val), level));
         }
 
         let alloc = match self.alloc_at(Layout::new::<V>(), level) {
@@ -433,6 +460,16 @@ impl<T> Slab<T> {
             // SAFETY: ptr points into `self`, and reference is unique.
             Ok((&mut *ptr, alloc.level))
         }
+    }
+
+    /// 'Allocate' a ZST.
+    fn zst_fake_alloc<Z>(&self, _: Z) -> &mut Z {
+        assert_eq!(mem::size_of::<Z>(), 0);
+        let ptr = NonNull::<Z>::dangling().as_ptr();
+
+        // SAFETY: RawVec does this as well. Probably safe, only zero offsets in gep-inbounds.
+        // See https://github.com/rust-lang/unsafe-code-guidelines/issues/93
+        unsafe { &mut *ptr }
     }
 
     /// Try to bump the monotonic, atomic consume counter.
