@@ -34,7 +34,7 @@ fn main() {
 
     // Can also allocate values directly. Even without `alloc::vec::Vec`.
     let buffer: &'static mut [u32; 128] = A.leak([0; 128])
-    	.unwrap_or_else(|_| panic!("Runtime allocated too much before main"));
+        .unwrap_or_else(|_| panic!("Runtime allocated before main"));
     buffer.copy_from_slice(&v);
 
     println!("{:x?}", &buffer[..]);

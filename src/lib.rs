@@ -1,4 +1,4 @@
-//! General purpose global allocator(s) with static storage.
+//! General purpose global allocator(s) with static, inline storage.
 //!
 //! Provides an allocator for extremely resource constrained environments where the only memory
 //! guaranteed is your program's image in memory as provided by the loader. Possible use cases are
@@ -15,8 +15,18 @@
 //! fn main() {
 //!     let v = vec![0xdeadbeef_u32; 128];
 //!     println!("{:x?}", v);
+//!
+//!     let buffer: &'static mut [u32; 128] = A.leak([0; 128])
+//!         .unwrap_or_else(|_| panic!("Runtime allocated before main"));
 //! }
 //! ```
+//!
+//! ## Why the name?
+//!
+//! This crates makes it safe to define a *static* object and to then use its memory to *allocate*
+//! dynamic values without accidentally exposing or using uninitialized memory. This allows
+//! obtaining `&'static mut T` instances which is handy if a struct requires a mutable reference
+//! but it is also required that this struct has `'static` lifetime bounds itself.
 
 // Copyright 2019 Andreas Molzer
 #![no_std]

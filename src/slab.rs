@@ -4,12 +4,13 @@ use core::mem::{self, MaybeUninit};
 use core::ptr::{self, NonNull, null_mut};
 use core::sync::atomic::{AtomicUsize, Ordering};
 
-/// An allocator whose memory resource has static storage duration.
+/// An allocator drawing from an inner, statically sized memory resource.
 ///
 /// The type parameter `T` is used only to annotate the required size and alignment of the region
 /// and has no futher use. Note that in particular there is no safe way to retrieve or unwrap an
 /// inner instance even if the `Slab` was not constructed as a shared global static. Nevertheless,
-
+/// the choice of type makes it easier to reason about potentially required extra space due to
+/// alignment padding.
 ///
 /// ## Usage as global allocator
 ///
@@ -24,16 +25,17 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 /// fn main() { }
 /// ```
 ///
-/// Take care, some runtime features of Rust will allocator some memory before or after your own
-/// code. In particular, it was found to be be tricky to find out more on the usage of the builtin
-/// test framework which seemingly allocates some structures per test.
+/// Take care, some runtime features of Rust will allocate some memory before or after your own
+/// code. In particular, it was found to be be tricky to predict the usage of the builtin test
+/// framework which seemingly allocates some structures per test.
 ///
 /// ## Usage as a non-dropping local allocator
 ///
 /// It is also possible to use a `Slab` as a stack local allocator or a specialized allocator. The
 /// interface offers some utilities for allocating values from references to shared or unshared
 /// instances directly. **Note**: this will never call the `Drop` implementation of the allocated
-/// type. In particular, it would almost surely not be safe to `Pin` the values.
+/// type. In particular, it would almost surely not be safe to `Pin` the values, except if there is
+/// a guarantee for the `Slab` itself to not be deallocated either.
 ///
 /// ```rust
 /// use static_alloc::Slab;
@@ -137,9 +139,13 @@ pub struct Slab<T> {
     storage: UnsafeCell<MaybeUninit<T>>,
 }
 
-/// Could not move a value into an allocation.
-#[derive(Debug)]
-pub struct NewError<T> {
+/// A value could not be moved into a slab allocation.
+///
+/// The error contains the value for which the allocation failed. Storing the value in the error
+/// keeps it alive in all cases. This prevents the `Drop` implementation from running and preserves
+/// resources which may otherwise not be trivial to restore.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct LeakError<T> {
     val: T,
     failure: Failure,
 }
@@ -150,13 +156,71 @@ pub struct NewError<T> {
 /// ensuring that an allocation is performed at a specific level it is thus possible to check that
 /// multiple allocations happened in succession without other intermediate allocations. This
 /// ability in turns makes it possible to group allocations together, for example to initialize a
-/// struct member-by-member or to extend a slice.
+/// `#[repr(C)]` struct member-by-member or to extend a slice.
+///
+/// ## Usage
+///
+/// The main use is successively allocating a slice without requiring all data to be present at
+/// once. Other similar interface often require an internal locking mechanism but `Level` leaves
+/// the choice to the user. This is not yet encapsulate in a safe API yet `Level` makes it easy to
+/// reason about.
+///
+/// ```
+/// # use core::slice;
+/// # use static_alloc::slab::{Level, Slab};
+/// static SLAB: Slab<[u64; 4]> = Slab::uninit();
+///
+/// /// Gathers as much data as possible.
+/// ///
+/// /// An arbitrary amount of data, can't stack allocate!
+/// fn gather_data(mut iter: impl Iterator<Item=u64>) -> &'static mut [u64] {
+///     let first = match iter.next() {
+///         Some(item) => item,
+///         None => return &mut [],
+///     };
+///
+///     let mut level: Level = SLAB.level();
+///     let mut begin: *mut u64;
+///     let mut count;
+///
+///     match SLAB.leak_at(first, level) {
+///         Ok((first, first_level)) => {
+///             begin = first;
+///             level = first_level;
+///             count = 1;
+///         },
+///         _ => return &mut [],
+///     }
+///
+///     let _ = iter.try_for_each(|value: u64| {
+///         match SLAB.leak_at(value, level) {
+///             Err(err) => return Err(err),
+///             Ok((_, new_level)) => level = new_level,
+///         };
+///         count += 1;
+///         Ok(())
+///     });
+///
+///     unsafe {
+///         // SAFETY: all `count` allocations are contiguous, begin is well aligned and no
+///         // reference is currently pointing at any of the values. The lifetime is `'static` as
+///         // the SLAB itself is static.
+///         slice::from_raw_parts_mut(begin, count)
+///     }
+/// }
+///
+/// fn main() {
+///     // There is no other thread running, so this succeeds.
+///     let slice = gather_data(0..=3);
+///     assert_eq!(slice, [0, 1, 2, 3]);
+/// }
+/// ```
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Level(usize);
 
-/// An allocation and current usage level.
+/// A successful allocation and current [`Level`].
 ///
-/// See [`Level`](./struct.level.html) for details.
+/// [`Level`]: struct.Level.html
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Allocation {
     /// Pointer to the region with specified layout.
@@ -166,9 +230,9 @@ pub struct Allocation {
     pub level: Level,
 }
 
-/// Reason for a failed allocation at an exact level.
+/// Reason for a failed allocation at an exact [`Level`].
 ///
-/// See [`Level`](./struct.level.html) for details.
+/// [`Level`]: struct.Level.html
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Failure {
     /// No space left for that allocation.
@@ -384,13 +448,13 @@ impl<T> Slab<T> {
     ///
     /// [`ptr::slice_from_raw_parts`]: https://github.com/rust-lang/rust/issues/36925
     /// [`ManuallyDrop::drop`]: https://doc.rust-lang.org/beta/std/mem/struct.ManuallyDrop.html#method.drop
-    pub fn leak<V>(&self, val: V) -> Result<&mut V, NewError<V>> {
+    pub fn leak<V>(&self, val: V) -> Result<&mut V, LeakError<V>> {
         let ptr = if mem::size_of::<V>() == 0 {
             return Ok(self.zst_fake_alloc(val));
         } else {
             match self.alloc(Layout::new::<V>()) {
                 Some(ptr) => ptr.as_ptr() as *mut V,
-                None => return Err(NewError::new(val, Failure::Exhausted)),
+                None => return Err(LeakError::new(val, Failure::Exhausted)),
             }
         };
 
@@ -433,13 +497,13 @@ impl<T> Slab<T> {
     /// [`leak`]: #method.leak
     /// [`level`]: #method.level
     pub fn leak_at<V>(&self, val: V, level: Level)
-        -> Result<(&mut V, Level), NewError<V>>
+        -> Result<(&mut V, Level), LeakError<V>>
     {
         if mem::size_of::<V>() == 0 {
             let observed = self.level();
 
             if level != observed {
-                return Err(NewError::new(val, Failure::Mismatch {
+                return Err(LeakError::new(val, Failure::Mismatch {
                     observed,
                 }));
             }
@@ -449,7 +513,7 @@ impl<T> Slab<T> {
 
         let alloc = match self.alloc_at(Layout::new::<V>(), level) {
             Ok(alloc) => alloc,
-            Err(err) => return Err(NewError::new(val, err)),
+            Err(err) => return Err(LeakError::new(val, err)),
         };
 
         let ptr = alloc.ptr.as_ptr() as *mut V;
@@ -505,15 +569,17 @@ impl<T> Slab<T> {
     }
 }
 
-impl<T> NewError<T> {
+impl<T> LeakError<T> {
     fn new(val: T, failure: Failure) -> Self {
-        NewError { val, failure, }
+        LeakError { val, failure, }
     }
 
+    /// Inspect the cause of this error.
     pub fn kind(&self) -> Failure {
         self.failure
     }
 
+    /// Retrieve the value that could not be allocated.
     pub fn into_inner(self) -> T {
         self.val
     }
