@@ -32,12 +32,12 @@
 #![no_std]
 
 pub mod slab;
-mod uninit;
-mod vec;
+pub mod uninit;
+pub mod fixed_vec;
 
-use uninit::Uninit;
-
-pub use crate::slab::Slab;
+pub use fixed_vec::FixedVec;
+pub use uninit::Uninit;
+pub use slab::Slab;
 
 // Can't use the macro-call itself within the `doc` attribute. So force it to eval it as part of
 // the macro invocation.
