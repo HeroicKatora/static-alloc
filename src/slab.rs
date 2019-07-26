@@ -232,9 +232,13 @@ pub struct Allocation {
     pub level: Level,
 }
 
-struct UninitAlloc<'a> {
-    uninit: Uninit<'a, ()>,
-    level: Level,
+#[derive(Debug)]
+pub struct UninitAllocation<'a, T=()> {
+    /// Uninit pointer to the region with specified layout.
+    pub uninit: Uninit<'a, T>,
+
+    /// The observed amount of consumed bytes after the allocation.
+    pub level: Level,
 }
 
 /// Reason for a failed allocation at an exact [`Level`].
@@ -311,7 +315,7 @@ impl<T> Slab<T> {
     pub fn alloc_at(&self, layout: Layout, level: Level)
         -> Result<Allocation, Failure>
     {
-        let UninitAlloc { uninit, level } = self.try_alloc_at(layout, level.0)?;
+        let UninitAllocation { uninit, level } = self.try_alloc_at(layout, level.0)?;
 
         Ok(Allocation {
             ptr: uninit.as_non_null().cast(),
@@ -319,13 +323,42 @@ impl<T> Slab<T> {
         })
     }
 
-    fn get<V>(&self) -> Option<Uninit<V>> {
+    pub fn get_layout(&self, layout: Layout)
+        -> Option<UninitAllocation<'_>>
+    {
+        self.try_alloc(layout)
+    }
+
+    pub fn get_layout_at(&self, layout: Layout, at: Level)
+        -> Result<UninitAllocation<'_>, Failure>
+    {
+        self.try_alloc_at(layout, at.0)
+    }
+
+    pub fn get<V>(&self) -> Option<UninitAllocation<V>> {
         let layout = Layout::new::<V>();
         assert!(layout.size() > 0, "Violated allocation requirement: Requested region of size 0");
 
-        let UninitAlloc { uninit, level: _, } = self.try_alloc(layout)?;
-        // UNWRAP: it has exactly the requested size of `V`.
-        Some(uninit.cast().ok().unwrap())
+        let UninitAllocation { uninit, level, } = self.try_alloc(layout)?;
+
+        Some(UninitAllocation {
+            // UNWRAP: it has exactly the requested size of `V`.
+            uninit: uninit.cast().ok().unwrap(),
+            level,
+        })
+    }
+
+    pub fn get_at<V>(&self, level: Level) -> Result<UninitAllocation<V>, Failure> {
+        let layout = Layout::new::<V>();
+        assert!(layout.size() > 0, "Violated allocation requirement: Requested region of size 0");
+
+        let UninitAllocation { uninit, level, } = self.try_alloc_at(layout, level.0)?;
+
+        Ok(UninitAllocation {
+            // UNWRAP: it has exactly the requested size of `V`.
+            uninit: uninit.cast().ok().unwrap(),
+            level,
+        })
     }
 
     /// Observe the current level.
@@ -339,7 +372,7 @@ impl<T> Slab<T> {
     }
 
     fn try_alloc(&self, layout: Layout)
-        -> Option<UninitAlloc<'_>>
+        -> Option<UninitAllocation<'_>>
     {
         // Guess zero, this will fail when we try to access it and it isn't.
         let mut consumed = 0;
@@ -361,7 +394,7 @@ impl<T> Slab<T> {
     /// # Panics
     /// This function panics if `expect_consumed` is larger than `length`.
     fn try_alloc_at(&self, layout: Layout, expect_consumed: usize)
-        -> Result<UninitAlloc<'_>, Failure>
+        -> Result<UninitAllocation<'_>, Failure>
     {
         assert!(layout.size() > 0);
         let length = mem::size_of::<T>();
@@ -416,7 +449,7 @@ impl<T> Slab<T> {
             Uninit::from_memory(ptr.cast(), requested)
         };
 
-        Ok(UninitAlloc {
+        Ok(UninitAllocation {
             uninit,
             level: Level(new_consumed),
         })
@@ -480,20 +513,13 @@ impl<T> Slab<T> {
     /// [`ptr::slice_from_raw_parts`]: https://github.com/rust-lang/rust/issues/36925
     /// [`ManuallyDrop::drop`]: https://doc.rust-lang.org/beta/std/mem/struct.ManuallyDrop.html#method.drop
     pub fn leak<V>(&self, val: V) -> Result<&mut V, LeakError<V>> {
-        let ptr = if mem::size_of::<V>() == 0 {
+        if mem::size_of::<V>() == 0 {
             return Ok(self.zst_fake_alloc(val));
-        } else {
-            match self.alloc(Layout::new::<V>()) {
-                Some(ptr) => ptr.as_ptr() as *mut V,
-                None => return Err(LeakError::new(val, Failure::Exhausted)),
-            }
-        };
+        }
 
-        unsafe {
-            // SAFETY: ptr is valid for write, non-null, aligned according to V's layout.
-            ptr::write(ptr, val);
-            // SAFETY: ptr points into `self`, and reference is unique.
-            Ok(&mut *ptr)
+        match self.get::<V>() {
+            Some(alloc) => Ok(alloc.uninit.init(val)),
+            None => Err(LeakError::new(val, Failure::Exhausted)),
         }
     }
 
@@ -542,19 +568,13 @@ impl<T> Slab<T> {
             return Ok((self.zst_fake_alloc(val), level));
         }
 
-        let alloc = match self.alloc_at(Layout::new::<V>(), level) {
+        let alloc = match self.get_at::<V>(level) {
             Ok(alloc) => alloc,
             Err(err) => return Err(LeakError::new(val, err)),
         };
 
-        let ptr = alloc.ptr.as_ptr() as *mut V;
-
-        unsafe {
-            // SAFETY: ptr is valid for write, non-null, aligned according to V's layout.
-            ptr::write(ptr, val);
-            // SAFETY: ptr points into `self`, and reference is unique.
-            Ok((&mut *ptr, alloc.level))
-        }
+        let mutref = alloc.uninit.init(val);
+        Ok((mutref, alloc.level))
     }
 
     /// 'Allocate' a ZST.

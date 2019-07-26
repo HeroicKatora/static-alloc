@@ -1,7 +1,9 @@
-use core::{mem, ptr};
+use core::ptr;
+use core::alloc::Layout;
 use core::marker::PhantomData;
 
 /// Points to an uninitialized place but would otherwise be a valid reference.
+#[derive(Debug)]
 pub struct Uninit<'a, T> {
     ptr: ptr::NonNull<T>,
     len: usize,
@@ -9,6 +11,11 @@ pub struct Uninit<'a, T> {
 }
 
 impl Uninit<'_, ()> {
+    /// Create a uninit pointer from raw memory.
+    ///
+    /// ## Safety
+    /// A valid, unaliased allocation must exist at the pointer with length at least `len`. It need
+    /// *not* be initialized.
     pub unsafe fn from_memory(ptr: ptr::NonNull<()>, len: usize) -> Self {
         Uninit {
             ptr,
@@ -16,15 +23,55 @@ impl Uninit<'_, ()> {
             lifetime: PhantomData,
         }
     }
+
+    pub fn split_at(mut self, at: usize) -> Result<(Self, Self), Self> {
+        if self.len < at {
+            return Err(self)
+        }
+
+        let base = self.ptr.cast::<u8>().as_ptr();
+        // SAFETY: by `from_memory`, all offsets `< len` are within the allocation.
+        // In particular, no pointer within or one-past-the-end is null.
+        let next_base = unsafe { ptr::NonNull::new_unchecked(base.add(at)) };
+        let next_len = self.len - at;
+        self.len -= at;
+
+        // SAFETY:
+        // * unaliased because we just clear it.
+        // * within one allocation, namely the one we are in.
+        let other = unsafe { Self::from_memory(next_base.cast(), next_len) };
+        Ok((self, other))
+    }
+
+    /// Split so that the second part fits the layout.
+    pub fn split_align(self, layout: Layout) -> Result<(Self, Self), Self> {
+        let align = self.ptr.as_ptr().align_offset(layout.align());
+        let aligned_len = self.len.checked_sub(align).and_then(|len| len.checked_sub(layout.size()));
+
+        if aligned_len.is_none() {
+            return Err(self)
+        }
+
+        let (front, aligned) = self.split_at(align)?;
+        assert!(aligned.fits(layout));
+        Ok((front, aligned))
+    }
+}
+
+impl<T> Uninit<'_, T> {
+    fn fits(&self, layout: Layout) -> bool {
+        self.ptr.as_ptr().align_offset(layout.align()) == 0
+            && layout.size() <= self.len
+    }
+
+    pub fn len(&self) -> usize {
+        self.len
+    }
 }
 
 impl<'a, T> Uninit<'a, T> {
     pub fn cast<U>(self) -> Result<Uninit<'a, U>, Self> {
-        if self.ptr.as_ptr().align_offset(mem::align_of::<U>()) != 0 {
-            return Err(self);
-        }
-
-        if self.len < mem::size_of::<T>() {
+        if !self.fits(Layout::new::<U>()) {
             return Err(self);
         }
 
