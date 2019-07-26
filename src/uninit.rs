@@ -60,7 +60,7 @@ impl Uninit<'_, ()> {
         }
     }
 
-    pub fn split_at(mut self, at: usize) -> Result<(Self, Self), Self> {
+    pub fn split_at_byte(mut self, at: usize) -> Result<(Self, Self), Self> {
         if self.len < at {
             return Err(self)
         }
@@ -88,13 +88,21 @@ impl Uninit<'_, ()> {
             return Err(self)
         }
 
-        let (front, aligned) = self.split_at(align)?;
+        let (front, aligned) = self.split_at_byte(align)?;
         assert!(aligned.fits(layout));
         Ok((front, aligned))
     }
 }
 
 impl<'a> Uninit<'a, ()> {
+    fn decast<T: ?Sized>(uninit: Uninit<'a, T>) -> Self {
+        Uninit {
+            ptr: uninit.ptr.cast(),
+            len: uninit.len,
+            lifetime: PhantomData,
+        }
+    }
+
     /// Split so that the tail is aligned and valid for a `U`.
     pub fn split_cast<U>(self) -> Result<(Self, Uninit<'a, U>), Self> {
         let (this, split) = self.split_layout(Layout::new::<U>())?;
@@ -176,10 +184,9 @@ impl<'a, T> Uninit<'a, T> {
 
     /// Split off the tail that is not required to hold an instance of `T`.
     pub fn shrink_to_fit(self) -> (Self, Uninit<'a, ()>) {
-        // `()` fits every uninit
-        let deinit = self.cast::<()>().ok().unwrap();
+        let deinit = Uninit::decast(self);
         // UNWRAP: our own layout fits `T`
-        let (minimal, tail) = deinit.split_at(mem::size_of::<T>()).ok().unwrap();
+        let (minimal, tail) = deinit.split_at_byte(mem::size_of::<T>()).ok().unwrap();
         // UNWRAP: the alignment didn't change, and size is still large enough
         let restored = minimal.cast().ok().unwrap();
         (restored, tail)
@@ -206,8 +213,39 @@ impl<'a, T> Uninit<'a, [T]> {
         self.ptr.as_ptr() as *mut T
     }
 
-    pub fn len(&self) -> usize {
-        self.size() / mem::size_of::<T>()
+    pub fn capacity(&self) -> usize {
+        self.size()
+            .checked_div(mem::size_of::<T>())
+            .unwrap_or_else(usize::max_value)
+    }
+
+    pub fn split_at(self, at: usize) -> Result<(Self, Self), Self> {
+        let byte = match at.checked_mul(mem::size_of::<T>()) {
+            None => return Err(self),
+            Some(byte) if byte > self.len => return Err(self),
+            Some(byte) => byte,
+        };
+
+        let deinit = Uninit::decast(self);
+        let (head, tail) = deinit.split_at_byte(byte).ok().unwrap();
+        let head = head.cast_slice().ok().unwrap();
+        let tail = tail.cast_slice().ok().unwrap();
+
+        Ok((head, tail))
+    }
+
+    pub fn split_first(self) -> Result<(Uninit<'a, T>, Self), Self> {
+        self.split_at(1)
+            // If it is a valid slice of length 1 it is a valid `T`.
+            .map(|(init, tail)| (Uninit::decast(init).cast().ok().unwrap(), tail))
+    }
+
+    pub fn split_last(self) -> Result<(Self, Uninit<'a, T>), Self> {
+        // Explicitely wrap here: If capacity is 0 then `0 < size_of::<T> ` and the split will fail.
+        let split = self.capacity().wrapping_sub(1);
+        self.split_at(split)
+            // If it is a valid slice of length 1 it is a valid `T`.
+            .map(|(head, init)| (head, Uninit::decast(init).cast().ok().unwrap()))
     }
 }
 
@@ -273,8 +311,8 @@ impl<'a, T: ?Sized> Uninit<'a, T> {
     }
 }
 impl UninitView<'_, ()> {
-    pub fn split_at(self, at: usize) -> Result<(Self, Self), Self> {
-        let (head, tail) = self.0.split_at(at).map_err(UninitView)?;
+    pub fn split_at_byte(self, at: usize) -> Result<(Self, Self), Self> {
+        let (head, tail) = self.0.split_at_byte(at).map_err(UninitView)?;
         Ok((UninitView(head), UninitView(tail)))
     }
 
@@ -347,8 +385,18 @@ impl<'a, T> UninitView<'a, [T]> {
         self.0.as_begin_ptr() as *const T
     }
 
-    pub fn len(&self) -> usize {
-        self.0.len()
+    pub fn capacity(&self) -> usize {
+        self.0.capacity()
+    }
+
+    pub fn split_at(self, at: usize) -> Result<(Self, Self), Self> {
+        let (head, tail) = self.0.split_at(at).map_err(UninitView)?;
+        Ok((UninitView(head), UninitView(tail)))
+    }
+
+    pub fn split_first(self) -> Result<(UninitView<'a, T>, Self), Self> {
+        let (head, tail) = self.0.split_first().map_err(UninitView)?;
+        Ok((UninitView(head), UninitView(tail)))
     }
 }
 
