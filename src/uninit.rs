@@ -70,7 +70,7 @@ impl Uninit<'_, ()> {
         // In particular, no pointer within or one-past-the-end is null.
         let next_base = unsafe { ptr::NonNull::new_unchecked(base.add(at)) };
         let next_len = self.len - at;
-        self.len -= at;
+        self.len = at;
 
         // SAFETY:
         // * unaliased because we just clear it.
