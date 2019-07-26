@@ -1,12 +1,16 @@
-use core::{ptr, slice};
+use core::{ops, ptr, slice};
 use crate::uninit::Uninit;
 
+/// A `Vec`-like structure that does not manage its allocation.
+///
+/// This vector type will never (re-)allocate but it can also not free underused memory.
 pub struct FixedVec<'a, T> {
     uninit: Uninit<'a, [T]>,
     length: usize,
 }
 
 impl<T> FixedVec<'_, T> {
+    /// Extracts a slice containing the entire vector.
     pub fn as_slice(&self) -> &[T] {
         unsafe {
             // SAFETY: length is the number of initialized elements.
@@ -14,6 +18,7 @@ impl<T> FixedVec<'_, T> {
         }
     }
 
+    /// Extracts the mutable slice containing the entire vector.
     pub fn as_mut_slice(&mut self) -> &mut [T] {
         unsafe {
             // SAFETY:
@@ -23,18 +28,43 @@ impl<T> FixedVec<'_, T> {
         }
     }
 
+    /// Returns the number of elements in the vector.
     pub fn len(&self) -> usize {
         self.length
     }
 
+    /// Returns the number of elements the vector can hold.
     pub fn capacity(&mut self) -> usize {
         self.uninit.capacity()
     }
 
+    /// Returns `true` if the vector contains no elements.
     pub fn is_empty(&self) -> bool {
         self.length == 0
     }
 
+    /// Appends an element to the back of a collection.
+    ///
+    /// Return `Err(val)` if it is not possible to append the element.
+    ///
+    /// ```
+    /// use static_alloc::{FixedVec, Uninit};
+    /// use core::mem::MaybeUninit;
+    ///
+    /// // Only enough storage for one element.
+    /// let mut allocation: MaybeUninit<[u32; 1]> = MaybeUninit::uninit();
+    /// let storage = Uninit::from_maybe_uninit(&mut allocation)
+    ///     .cast_slice::<u32>()
+    ///     .ok().expect("Everything fine for storings Foo's");
+    /// let mut vec = FixedVec::new(storage);
+    ///
+    /// // First push succeeds.
+    /// assert_eq!(vec.push(1), Ok(()));
+    ///
+    /// // The second push fails.
+    /// assert_eq!(vec.push(2), Err(2));
+    ///
+    /// ```
     pub fn push(&mut self, val: T) -> Result<(), T> {
         if self.length == usize::max_value() {
             return Err(val);
@@ -51,6 +81,7 @@ impl<T> FixedVec<'_, T> {
         Ok(())
     }
 
+    /// Removes the last element from a vector and returns it, or `None` if it is empty.
     pub fn pop(&mut self) -> Option<T> {
         if self.length == 0 {
             return None;
@@ -72,11 +103,27 @@ impl<T> FixedVec<'_, T> {
 }
 
 impl<'a, T> FixedVec<'a, T> {
+    /// Create a `Vec` in a pre-allocated region.
+    ///
+    /// The capacity will be that of the underlying allocation.
     pub fn new(uninit: Uninit<'a, [T]>) -> Self {
         FixedVec {
             uninit,
             length: 0,
         }
+    }
+}
+
+impl<T> ops::Deref for FixedVec<'_, T> {
+    type Target = [T];
+    fn deref(&self) -> &[T] {
+        self.as_slice()
+    }
+}
+
+impl<T> ops::DerefMut for FixedVec<'_, T> {
+    fn deref_mut(&mut self) -> &mut [T] {
+        self.as_mut_slice()
     }
 }
 
