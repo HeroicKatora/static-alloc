@@ -4,9 +4,53 @@ use core::marker::PhantomData;
 
 /// Points to an uninitialized place but would otherwise be a valid reference.
 ///
-/// Makes it possible to deal with uninitialized allocations without requiring an `unsafe` block
-/// initializing them and offering a much safer interface for partial initialization and layout
+/// This is a `&mut`-like struct that is somewhat of a pendant to `MaybeUninit`. It makes it
+/// possible to deal with uninitialized allocations without requiring an `unsafe` block
+/// initializing them and offers a much safer interface for partial initialization and layout
 /// calculations than raw pointers.
+///
+/// Note that it also supports slices which means it does not use `MaybeUninit` internally but
+/// offers conversion where necessary.
+///
+/// ## Usage
+///
+/// The basic usage is also interacting with `MaybeUninit`:
+///
+/// ```
+/// # #[derive(Default)]
+/// # struct MyStruct { };
+/// use core::mem::MaybeUninit;
+/// use static_alloc::Uninit;
+///
+/// let mut alloc: MaybeUninit<MyStruct> = MaybeUninit::uninit();
+/// let uninit = Uninit::from_maybe_uninit(&mut alloc);
+///
+/// // notice: no unsafe
+/// let instance: &mut MyStruct = uninit.init(MyStruct::default());
+/// ```
+///
+/// But since we are working on arbitrary uninitialized memory it is also possible to reuse the
+/// structure for completely arbitrary other types. Just note that there is no integrated mechanis
+/// for calling `Drop`.
+///
+/// ```
+/// use core::mem::MaybeUninit;
+/// use static_alloc::Uninit;
+///
+/// // Just a generic buffer.
+/// let mut alloc: MaybeUninit<[u32; 1024]> = MaybeUninit::uninit();
+/// let uninit = Uninit::from_maybe_uninit(&mut alloc);
+///
+/// // Now use the first `u32` for a counter:
+/// let (counter, tail) = uninit.cast().unwrap().split_to_fit();
+/// let counter: &mut u32 = counter.init(0);
+///
+/// // And some more for a few `u64`.
+/// // Note that these are not trivially aligned, but `Uninit` does that for us.
+/// let (_, tail) = tail.split_cast().unwrap();
+/// let (values, tail) = tail.split_to_fit();
+/// let values: &mut [u64; 2] = values.init([0xdead, 0xbeef]);
+/// ```
 pub struct Uninit<'a, T: ?Sized> {
     /// Pointer to the start of the region.
     ///
@@ -26,12 +70,14 @@ pub struct Uninit<'a, T: ?Sized> {
     lifetime: PhantomData<&'a mut T>,
 }
 
-/// A non-mutable view on a region used in an `Uninit`.
+/// A non-mutable view on a region used in an [`Uninit`].
 ///
 /// Makes it possible to utilize the traversal methods (`split*`, `cast*`, ..) without requiring a
 /// mutable reference to the original `Uninit`. It will also never expose mutable pointers or
 /// accidentally offer an aliased mutable reference. Prefer this to instead avoiding the borrow of
 /// the `Uninit` and manually managing pointers to the region.
+///
+/// [`Uninit`]: ./struct.Uninit.html
 pub struct UninitView<'a, T: ?Sized>(
     /// The region. The pointer in it must never be dereferenced mutably.
     Uninit<'a, T>,
@@ -58,6 +104,9 @@ impl Uninit<'_, ()> {
         }
     }
 
+    /// Split the uninit slice at a byte boundary.
+    ///
+    /// Return `Ok` if the location is in-bounds and `Err` if it is out of bounds.
     pub fn split_at_byte(mut self, at: usize) -> Result<(Self, Self), Self> {
         if self.len < at {
             return Err(self)
@@ -78,6 +127,8 @@ impl Uninit<'_, ()> {
     }
 
     /// Split so that the second part fits the layout.
+    ///
+    /// Return `Ok` if this is possible in-bounds and `Err` if it is not.
     pub fn split_layout(self, layout: Layout) -> Result<(Self, Self), Self> {
         let align = self.ptr.cast::<u8>().as_ptr().align_offset(layout.align());
         let aligned_len = self.len.checked_sub(align).and_then(|len| len.checked_sub(layout.size()));
@@ -102,12 +153,24 @@ impl<'a> Uninit<'a, ()> {
     }
 
     /// Split so that the tail is aligned and valid for a `U`.
+    ///
+    /// Return `Ok` if this is possible in-bounds (aligned and enough room for at least one `U`)
+    /// and `Err` if it is not. The first tuple element is the `Uninit` pointing to the skipped
+    /// memory.
     pub fn split_cast<U>(self) -> Result<(Self, Uninit<'a, U>), Self> {
         let (this, split) = self.split_layout(Layout::new::<U>())?;
         let cast = split.cast::<U>().unwrap();
         Ok((this, cast))
     }
 
+    /// Split so that the tail is aligned for a slice `[U]`.
+    ///
+    /// Return `Ok` if this is possible in-bounds and `Err` if it is not. The first tuple element
+    /// is the `Uninit` pointing to the skipped memory.
+    ///
+    /// The length of the slice is the arbitrary amount that fits into the tail of the allocation.
+    /// Note that the length always fulfills the safety requirements for `slice::from_raw_parts`
+    /// since the `Uninit` must be contained in a single allocation.
     pub fn split_slice<U>(self) -> Result<(Self, Uninit<'a, [U]>), Self> {
         let layout = Layout::for_value::<[U]>(&[]);
         let (this, split) = self.split_layout(layout)?;
@@ -138,6 +201,7 @@ impl<T> Uninit<'_, T> {
 }
 
 impl<'a, T> Uninit<'a, T> {
+    /// Create an initializable pointer to the inner bytes of a `MaybeUninit`.
     pub fn from_maybe_uninit(mem: &'a mut mem::MaybeUninit<T>) -> Self {
         let ptr = ptr::NonNull::new(mem.as_mut_ptr()).unwrap();
         let raw = unsafe {
@@ -149,6 +213,15 @@ impl<'a, T> Uninit<'a, T> {
         raw.cast().unwrap()
     }
 
+    /// Try to cast to an `Uninit` for another type.
+    ///
+    /// Return `Ok` if the current `Uninit` is suitably aligned and large enough to hold at least
+    /// one `U` and `Err` if it is not. Note that the successful result points to unused remaining
+    /// memory behind where the instance can be placed.
+    ///
+    /// Use [`split_to_fit`] to get rid of surplus memory at the end.
+    ///
+    /// [`split_to_fit`]: #method.split_to_fit
     pub fn cast<U>(self) -> Result<Uninit<'a, U>, Self> {
         if !self.fits(Layout::new::<U>()) {
             return Err(self);
@@ -161,6 +234,11 @@ impl<'a, T> Uninit<'a, T> {
         })
     }
 
+    /// Try to cast to an `Uninit` for a slice type.
+    ///
+    /// Return `Ok` if the current `Uninit` is suitably aligned and large enough to hold at least
+    /// one `U` and `Err` if it is not. Note that the successful result points to unused remaining
+    /// memory behind where the instances can be placed.
     pub fn cast_slice<U>(self) -> Result<Uninit<'a, [U]>, Self> {
         let empty = Layout::for_value::<[U]>(&[]);
 
@@ -180,8 +258,8 @@ impl<'a, T> Uninit<'a, T> {
         })
     }
 
-    /// Split off the tail that is not required to hold an instance of `T`.
-    pub fn shrink_to_fit(self) -> (Self, Uninit<'a, ()>) {
+    /// Split off the tail that is not required for holding an instance of `T`.
+    pub fn split_to_fit(self) -> (Self, Uninit<'a, ()>) {
         let deinit = Uninit::decast(self);
         // UNWRAP: our own layout fits `T`
         let (minimal, tail) = deinit.split_at_byte(mem::size_of::<T>()).unwrap();
@@ -207,16 +285,23 @@ impl<'a, T> Uninit<'a, T> {
 }
 
 impl<'a, T> Uninit<'a, [T]> {
+    /// Get the pointer to the first element of the slice.
+    ///
+    /// If the slice would be empty then the pointer may be the past-the-end pointer as well.
     pub fn as_begin_ptr(&self) -> *mut T {
         self.ptr.as_ptr() as *mut T
     }
 
+    /// Calculate the theoretical capacity of a slice in the pointed-to allocation.
     pub fn capacity(&self) -> usize {
         self.size()
             .checked_div(mem::size_of::<T>())
             .unwrap_or_else(usize::max_value)
     }
 
+    /// Split the slice at an index.
+    ///
+    /// This is the pointer equivalent of `slice::split_at`.
     pub fn split_at(self, at: usize) -> Result<(Self, Self), Self> {
         let byte = match at.checked_mul(mem::size_of::<T>()) {
             None => return Err(self),
@@ -232,12 +317,18 @@ impl<'a, T> Uninit<'a, [T]> {
         Ok((head, tail))
     }
 
+    /// Split the first element from the slice.
+    ///
+    /// This is the pointer equivalent of `slice::split_first`.
     pub fn split_first(self) -> Result<(Uninit<'a, T>, Self), Self> {
         self.split_at(1)
             // If it is a valid slice of length 1 it is a valid `T`.
             .map(|(init, tail)| (Uninit::decast(init).cast().unwrap(), tail))
     }
 
+    /// Split the last element from the slice.
+    ///
+    /// This is the pointer equivalent of `slice::split_last`.
     pub fn split_last(self) -> Result<(Self, Uninit<'a, T>), Self> {
         // Explicitely wrap here: If capacity is 0 then `0 < size_of::<T> ` and the split will fail.
         let split = self.capacity().wrapping_sub(1);
@@ -248,6 +339,10 @@ impl<'a, T> Uninit<'a, [T]> {
 }
 
 impl<'a, T: ?Sized> Uninit<'a, T> {
+    /// Borrow a view of the `Uninit` region.
+    ///
+    /// This is the equivalent of `&*mut_ref as *const _` but never runs afoul of accidentally
+    /// creating an actual reference.
     pub fn borrow(&self) -> UninitView<'_, T> {
         UninitView(Uninit {
             ptr: self.ptr,
@@ -258,7 +353,8 @@ impl<'a, T: ?Sized> Uninit<'a, T> {
 
     /// Borrow the `Uninit` region for a shorter duration.
     ///
-    /// This is the equivalent of `&mut *mut_ref`.
+    /// This is the equivalent of `&mut *mut_ref as *mut _` but never runs afoul of accidentally
+    /// creating an actual reference.
     pub fn borrow_mut(&mut self) -> Uninit<'_, T> {
         Uninit {
             ptr: self.ptr,
@@ -309,12 +405,21 @@ impl<'a, T: ?Sized> Uninit<'a, T> {
     }
 }
 impl UninitView<'_, ()> {
+    /// Split the uninit view at a byte boundary.
+    ///
+    /// See [`Uninit::split_at_byte`] for more details.
+    ///
+    /// [`Uninit::split_at_byte`]: ./struct.Uninit.html#method.split_at_byte
     pub fn split_at_byte(self, at: usize) -> Result<(Self, Self), Self> {
         let (head, tail) = self.0.split_at_byte(at).map_err(UninitView)?;
         Ok((UninitView(head), UninitView(tail)))
     }
 
     /// Split so that the second part fits the layout.
+    ///
+    /// See [`Uninit::split_layout`] for more details.
+    ///
+    /// [`Uninit::split_layout`]: ./struct.Uninit.html#method.split_layout
     pub fn split_layout(self, layout: Layout) -> Result<(Self, Self), Self> {
         let (head, tail) = self.0.split_layout(layout).map_err(UninitView)?;
         Ok((UninitView(head), UninitView(tail)))
@@ -329,6 +434,7 @@ impl<'a> UninitView<'a, ()> {
         Ok((this, cast))
     }
 
+    /// Split so that the tail is aligned for a slice `[U]`.
     pub fn split_slice<U>(self) -> Result<(Self, UninitView<'a, [U]>), Self> {
         let layout = Layout::for_value::<[U]>(&[]);
         let (this, split) = self.split_layout(layout)?;
@@ -348,6 +454,11 @@ impl<T> UninitView<'_, T> {
 }
 
 impl<'a, T> UninitView<'a, T> {
+    /// Create an view to the inner bytes of a `MaybeUninit`.
+    ///
+    /// This is hardly useful on its own but since `UninitView` mirrors the traversal methods of
+    /// `Uninit` it can be used to get pointers to already initialized elements in an immutable
+    /// context.
     pub fn from_maybe_uninit(mem: &'a mem::MaybeUninit<T>) -> Self {
         let ptr = ptr::NonNull::new(mem.as_ptr() as *mut T).unwrap();
         let raw = unsafe {
@@ -359,46 +470,59 @@ impl<'a, T> UninitView<'a, T> {
         UninitView(raw).cast().unwrap()
     }
 
+    /// Try to cast to an `UninitView` for another type.
     pub fn cast<U>(self) -> Result<UninitView<'a, U>, Self> {
         self.0.cast::<U>()
             .map_err(UninitView)
             .map(UninitView)
     }
 
+    /// Try to cast to an `UninitView` for a slice type.
     pub fn cast_slice<U>(self) -> Result<UninitView<'a, [U]>, Self> {
         self.0.cast_slice::<U>()
             .map_err(UninitView)
             .map(UninitView)
     }
 
-    /// Split off the tail that is not required to hold an instance of `T`.
-    pub fn shrink_to_fit(self) -> (Self, UninitView<'a, ()>) {
-        let (head, tail) = self.0.shrink_to_fit();
+    /// Split off the tail that is not required for holding an instance of `T`.
+    pub fn split_to_fit(self) -> (Self, UninitView<'a, ()>) {
+        let (head, tail) = self.0.split_to_fit();
         (UninitView(head), UninitView(tail))
     }
 }
 
 impl<'a, T> UninitView<'a, [T]> {
+    /// Get the pointer to the first element of the slice.
     pub fn as_begin_ptr(&self) -> *const T {
         self.0.as_begin_ptr() as *const T
     }
 
+    /// Calculate the theoretical capacity of a slice in the pointed-to allocation.
     pub fn capacity(&self) -> usize {
         self.0.capacity()
     }
 
+    /// Split the slice at an index.
     pub fn split_at(self, at: usize) -> Result<(Self, Self), Self> {
         let (head, tail) = self.0.split_at(at).map_err(UninitView)?;
         Ok((UninitView(head), UninitView(tail)))
     }
 
+    /// Split the first element from the slice.
     pub fn split_first(self) -> Result<(UninitView<'a, T>, Self), Self> {
         let (head, tail) = self.0.split_first().map_err(UninitView)?;
+        Ok((UninitView(head), UninitView(tail)))
+    }
+
+    /// Split the last element from the slice.
+    pub fn split_last(self) -> Result<(Self, UninitView<'a, T>), Self> {
+        let (head, tail) = self.0.split_last().map_err(UninitView)?;
         Ok((UninitView(head), UninitView(tail)))
     }
 }
 
 impl<'a, T: ?Sized> UninitView<'a, T> {
+    /// Borrow another view of the `Uninit` region.
     pub fn borrow(&self) -> UninitView<'_, T> {
         self.0.borrow()
     }
