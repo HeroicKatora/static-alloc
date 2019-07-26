@@ -1,4 +1,4 @@
-use core::{mem, ptr, slice};
+use core::{fmt, mem, ptr, slice};
 use core::alloc::Layout;
 use core::marker::PhantomData;
 
@@ -7,7 +7,6 @@ use core::marker::PhantomData;
 /// Makes it possible to deal with uninitialized allocations without requiring an `unsafe` block
 /// initializing them and offering a much safer interface for partial initialization and layout
 /// calculations than raw pointers.
-#[derive(Debug)]
 pub struct Uninit<'a, T: ?Sized> {
     /// Pointer to the start of the region.
     ///
@@ -33,7 +32,6 @@ pub struct Uninit<'a, T: ?Sized> {
 /// mutable reference to the original `Uninit`. It will also never expose mutable pointers or
 /// accidentally offer an aliased mutable reference. Prefer this to instead avoiding the borrow of
 /// the `Uninit` and manually managing pointers to the region.
-#[derive(Debug)]
 pub struct UninitView<'a, T: ?Sized>(
     /// The region. The pointer in it must never be dereferenced mutably.
     Uninit<'a, T>,
@@ -106,14 +104,14 @@ impl<'a> Uninit<'a, ()> {
     /// Split so that the tail is aligned and valid for a `U`.
     pub fn split_cast<U>(self) -> Result<(Self, Uninit<'a, U>), Self> {
         let (this, split) = self.split_layout(Layout::new::<U>())?;
-        let cast = split.cast::<U>().ok().unwrap();
+        let cast = split.cast::<U>().unwrap();
         Ok((this, cast))
     }
 
     pub fn split_slice<U>(self) -> Result<(Self, Uninit<'a, [U]>), Self> {
         let layout = Layout::for_value::<[U]>(&[]);
         let (this, split) = self.split_layout(layout)?;
-        let cast = split.cast_slice::<U>().ok().unwrap();
+        let cast = split.cast_slice::<U>().unwrap();
         Ok((this, cast))
     }
 }
@@ -148,7 +146,7 @@ impl<'a, T> Uninit<'a, T> {
             // * can write uninitialized bytes as much as we want
             Uninit::from_memory(ptr.cast(), mem::size_of_val(mem))
         };
-        raw.cast().ok().unwrap()
+        raw.cast().unwrap()
     }
 
     pub fn cast<U>(self) -> Result<Uninit<'a, U>, Self> {
@@ -186,9 +184,9 @@ impl<'a, T> Uninit<'a, T> {
     pub fn shrink_to_fit(self) -> (Self, Uninit<'a, ()>) {
         let deinit = Uninit::decast(self);
         // UNWRAP: our own layout fits `T`
-        let (minimal, tail) = deinit.split_at_byte(mem::size_of::<T>()).ok().unwrap();
+        let (minimal, tail) = deinit.split_at_byte(mem::size_of::<T>()).unwrap();
         // UNWRAP: the alignment didn't change, and size is still large enough
-        let restored = minimal.cast().ok().unwrap();
+        let restored = minimal.cast().unwrap();
         (restored, tail)
     }
 
@@ -227,9 +225,9 @@ impl<'a, T> Uninit<'a, [T]> {
         };
 
         let deinit = Uninit::decast(self);
-        let (head, tail) = deinit.split_at_byte(byte).ok().unwrap();
-        let head = head.cast_slice().ok().unwrap();
-        let tail = tail.cast_slice().ok().unwrap();
+        let (head, tail) = deinit.split_at_byte(byte).unwrap();
+        let head = head.cast_slice().unwrap();
+        let tail = tail.cast_slice().unwrap();
 
         Ok((head, tail))
     }
@@ -237,7 +235,7 @@ impl<'a, T> Uninit<'a, [T]> {
     pub fn split_first(self) -> Result<(Uninit<'a, T>, Self), Self> {
         self.split_at(1)
             // If it is a valid slice of length 1 it is a valid `T`.
-            .map(|(init, tail)| (Uninit::decast(init).cast().ok().unwrap(), tail))
+            .map(|(init, tail)| (Uninit::decast(init).cast().unwrap(), tail))
     }
 
     pub fn split_last(self) -> Result<(Self, Uninit<'a, T>), Self> {
@@ -245,7 +243,7 @@ impl<'a, T> Uninit<'a, [T]> {
         let split = self.capacity().wrapping_sub(1);
         self.split_at(split)
             // If it is a valid slice of length 1 it is a valid `T`.
-            .map(|(head, init)| (head, Uninit::decast(init).cast().ok().unwrap()))
+            .map(|(head, init)| (head, Uninit::decast(init).cast().unwrap()))
     }
 }
 
@@ -327,14 +325,14 @@ impl<'a> UninitView<'a, ()> {
     /// Split so that the tail is aligned and valid for a `U`.
     pub fn split_cast<U>(self) -> Result<(Self, UninitView<'a, U>), Self> {
         let (this, split) = self.split_layout(Layout::new::<U>())?;
-        let cast = split.cast::<U>().ok().unwrap();
+        let cast = split.cast::<U>().unwrap();
         Ok((this, cast))
     }
 
     pub fn split_slice<U>(self) -> Result<(Self, UninitView<'a, [U]>), Self> {
         let layout = Layout::for_value::<[U]>(&[]);
         let (this, split) = self.split_layout(layout)?;
-        let cast = split.cast_slice::<U>().ok().unwrap();
+        let cast = split.cast_slice::<U>().unwrap();
         Ok((this, cast))
     }
 }
@@ -358,7 +356,7 @@ impl<'a, T> UninitView<'a, T> {
             // * we will not write through the pointer created
             Uninit::from_memory(ptr.cast(), mem::size_of_val(mem))
         };
-        UninitView(raw).cast().ok().unwrap()
+        UninitView(raw).cast().unwrap()
     }
 
     pub fn cast<U>(self) -> Result<UninitView<'a, U>, Self> {
@@ -438,4 +436,22 @@ impl<'a, T: ?Sized> UninitView<'a, T> {
     pub unsafe fn into_ref(self) -> &'a T {
         &*self.as_ptr()
     }
+}
+
+impl<T: ?Sized> fmt::Debug for Uninit<'_, T> {
+   fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+       f.debug_tuple("Uninit")
+           .field(&self.ptr)
+           .field(&self.len)
+           .finish()
+   }
+}
+
+impl<T: ?Sized> fmt::Debug for UninitView<'_, T> {
+   fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+       f.debug_tuple("UninitView")
+           .field(&self.0.ptr)
+           .field(&self.0.len)
+           .finish()
+   }
 }
