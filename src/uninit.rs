@@ -79,7 +79,7 @@ impl Uninit<'_, ()> {
 
     /// Split so that the second part fits the layout.
     pub fn split_layout(self, layout: Layout) -> Result<(Self, Self), Self> {
-        let align = self.ptr.as_ptr().align_offset(layout.align());
+        let align = self.ptr.cast::<u8>().as_ptr().align_offset(layout.align());
         let aligned_len = self.len.checked_sub(align).and_then(|len| len.checked_sub(layout.size()));
 
         if aligned_len.is_none() {
