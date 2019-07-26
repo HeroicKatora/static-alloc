@@ -87,3 +87,79 @@ impl<T> Drop for FixedVec<'_, T> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::FixedVec;
+    use crate::Uninit;
+
+    use core::mem::MaybeUninit;
+    use core::sync::atomic::{AtomicUsize, Ordering};
+
+    #[test]
+    fn init_and_use() {
+        #[derive(Debug, PartialEq, Eq)]
+        struct Foo(usize);
+
+        const CAPACITY: usize = 30;
+
+        let mut allocation: MaybeUninit<[Foo; CAPACITY]> = MaybeUninit::uninit();
+        let storage = Uninit::from_maybe_uninit(&mut allocation)
+            .cast_slice::<Foo>()
+            .ok().expect("Everything fine for storings Foo's");
+        let mut vec = FixedVec::new(storage);
+
+        assert_eq!(vec.capacity(), CAPACITY);
+        assert_eq!(vec.len(), 0);
+        for i in 0..CAPACITY {
+            assert_eq!(vec.push(Foo(i)), Ok(()));
+        }
+
+        assert_eq!(vec.capacity(), CAPACITY);
+        assert_eq!(vec.len(), CAPACITY);
+
+        for i in (0..CAPACITY).rev() {
+            assert_eq!(vec.pop(), Some(Foo(i)));
+        }
+
+        assert_eq!(vec.capacity(), CAPACITY);
+        assert_eq!(vec.len(), 0);
+    }
+
+    #[test]
+    fn zst_drop() {
+        const COUNT: usize = 30;
+        static DROP_COUNTER: AtomicUsize = AtomicUsize::new(0);
+        struct HasDrop(usize);
+
+        impl Drop for HasDrop {
+            fn drop(&mut self) {
+                DROP_COUNTER.fetch_add(1, Ordering::SeqCst);
+            }
+        }
+
+
+        let mut allocation: MaybeUninit<[HasDrop; COUNT]> = MaybeUninit::uninit();
+        let storage = Uninit::from_maybe_uninit(&mut allocation)
+            .cast_slice::<HasDrop>()
+            .ok().expect("Everything fine for storings Foo's");
+        let mut vec = FixedVec::new(storage);
+
+        for i in 0..COUNT {
+            assert!(vec.push(HasDrop(i)).is_ok());
+        }
+
+        drop(vec);
+        assert_eq!(DROP_COUNTER.load(Ordering::SeqCst), COUNT);
+    }
+
+    #[test]
+    fn zst() {
+        struct Zst;
+
+        let storage = Uninit::<()>::invent_for_zst();
+        let mut vec = FixedVec::<Zst>::new(storage.cast_slice().unwrap());
+
+        assert_eq!(vec.capacity(), usize::max_value());
+    }
+}
