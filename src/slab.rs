@@ -1,7 +1,7 @@
 use core::alloc::{GlobalAlloc, Layout};
 use core::cell::UnsafeCell;
 use core::mem::{self, MaybeUninit};
-use core::ptr::{self, NonNull, null_mut};
+use core::ptr::{NonNull, null_mut};
 use core::sync::atomic::{AtomicUsize, Ordering};
 
 use super::Uninit;
@@ -336,9 +336,11 @@ impl<T> Slab<T> {
     }
 
     pub fn get<V>(&self) -> Option<UninitAllocation<V>> {
-        let layout = Layout::new::<V>();
-        assert!(layout.size() > 0, "Violated allocation requirement: Requested region of size 0");
+        if mem::size_of::<V>() == 0 {
+            return Some(self.zst_fake_alloc());
+        }
 
+        let layout = Layout::new::<V>();
         let UninitAllocation { uninit, level, } = self.try_alloc(layout)?;
 
         Some(UninitAllocation {
@@ -349,9 +351,18 @@ impl<T> Slab<T> {
     }
 
     pub fn get_at<V>(&self, level: Level) -> Result<UninitAllocation<V>, Failure> {
-        let layout = Layout::new::<V>();
-        assert!(layout.size() > 0, "Violated allocation requirement: Requested region of size 0");
+        if mem::size_of::<V>() == 0 {
+            let fake = self.zst_fake_alloc();
+            // Note: zst_fake_alloc is a noop on the level, we may as well check after.
+            if fake.level != level {
+                return Err(Failure::Mismatch {
+                    observed: fake.level,
+                });
+            }
+            return Ok(fake);
+        }
 
+        let layout = Layout::new::<V>();
         let UninitAllocation { uninit, level, } = self.try_alloc_at(layout, level.0)?;
 
         Ok(UninitAllocation {
@@ -513,10 +524,6 @@ impl<T> Slab<T> {
     /// [`ptr::slice_from_raw_parts`]: https://github.com/rust-lang/rust/issues/36925
     /// [`ManuallyDrop::drop`]: https://doc.rust-lang.org/beta/std/mem/struct.ManuallyDrop.html#method.drop
     pub fn leak<V>(&self, val: V) -> Result<&mut V, LeakError<V>> {
-        if mem::size_of::<V>() == 0 {
-            return Ok(self.zst_fake_alloc(val));
-        }
-
         match self.get::<V>() {
             Some(alloc) => Ok(alloc.uninit.init(val)),
             None => Err(LeakError::new(val, Failure::Exhausted)),
@@ -556,18 +563,6 @@ impl<T> Slab<T> {
     pub fn leak_at<V>(&self, val: V, level: Level)
         -> Result<(&mut V, Level), LeakError<V>>
     {
-        if mem::size_of::<V>() == 0 {
-            let observed = self.level();
-
-            if level != observed {
-                return Err(LeakError::new(val, Failure::Mismatch {
-                    observed,
-                }));
-            }
-
-            return Ok((self.zst_fake_alloc(val), level));
-        }
-
         let alloc = match self.get_at::<V>(level) {
             Ok(alloc) => alloc,
             Err(err) => return Err(LeakError::new(val, err)),
@@ -578,17 +573,11 @@ impl<T> Slab<T> {
     }
 
     /// 'Allocate' a ZST.
-    fn zst_fake_alloc<Z>(&self, val: Z) -> &mut Z {
-        assert_eq!(mem::size_of::<Z>(), 0);
-        let ptr = NonNull::<Z>::dangling().as_ptr();
-
-        // SAFETY: The pointer is suitably aligned and non-zero.
-        // This is equivalent to `mem::forget` but semantically more sensible.
-        unsafe { ptr::write(ptr, val); }
-
-        // SAFETY: RawVec does this as well. Probably safe, only zero offsets in gep-inbounds.
-        // See https://github.com/rust-lang/unsafe-code-guidelines/issues/93
-        unsafe { &mut *ptr }
+    fn zst_fake_alloc<Z>(&self) -> UninitAllocation<Z> {
+        UninitAllocation {
+            uninit: Uninit::invent_for_zst(),
+            level: self.level(),
+        }
     }
 
     /// Try to bump the monotonic, atomic consume counter.

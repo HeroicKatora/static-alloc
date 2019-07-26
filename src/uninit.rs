@@ -1,4 +1,4 @@
-use core::ptr;
+use core::{mem, ptr};
 use core::alloc::Layout;
 use core::marker::PhantomData;
 
@@ -62,6 +62,17 @@ impl<T> Uninit<'_, T> {
     fn fits(&self, layout: Layout) -> bool {
         self.ptr.as_ptr().align_offset(layout.align()) == 0
             && layout.size() <= self.len
+    }
+
+    /// Invent a new uninit allocation for a zero-sized type (ZST).
+    ///
+    /// # Panics
+    /// This method panics when the type parameter is not a zero sized type.
+    pub fn invent_for_zst() -> Self {
+        assert_eq!(mem::size_of::<T>(), 0, "Invented ZST uninit invoked with non-ZST");
+        let dangling = ptr::NonNull::<T>::dangling();
+        let raw = unsafe { Uninit::from_memory(dangling.cast(), 0) };
+        raw.cast().unwrap()
     }
 
     pub fn len(&self) -> usize {
