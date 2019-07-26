@@ -71,8 +71,8 @@ impl<T> FixedVec<'_, T> {
         }
 
         let init = match self.head_tail_mut().1.split_first() {
-            Ok((init, _)) => init,
-            Err(_) => return Err(val),
+            Some(init) => init,
+            None => return Err(val),
         };
 
         init.init(val);
@@ -87,7 +87,7 @@ impl<T> FixedVec<'_, T> {
             return None;
         }
 
-        let (_, last) = self.head_tail_mut().0.split_last().ok().unwrap();
+        let last = self.head_tail_mut().0.split_last().unwrap();
         let val = unsafe {
             // SAFETY: initialized and no reference of any kind exists to it.
             ptr::read(last.as_ptr())
@@ -96,9 +96,31 @@ impl<T> FixedVec<'_, T> {
         Some(val)
     }
 
+    /// Split the capacity of the collection into two at a given index.
+    ///
+    /// In contrast to `Vec::split_off` calling this method reduces the capacity of `self` to `at`.
+    ///
+    /// ## Panics
+    /// This method panics if `at > self.capacity()`.
+    pub fn split_and_shrink_to(&mut self, at: usize) -> Self {
+        assert!(at <= self.capacity(), "`at` out of bounds");
+        // `self.length` is always smaller than `split_at`.
+        let new_uninit = self.uninit.split_at(at).unwrap();
+        // The first `at` elements stay in this vec.
+        let new_len = self.length.saturating_sub(at);
+        self.length = self.length - new_len;
+        FixedVec {
+            uninit: new_uninit,
+            length: new_len,
+        }
+    }
+
     fn head_tail_mut(&mut self) -> (Uninit<'_, [T]>, Uninit<'_, [T]>) {
+        // Borrow, do not affect the actual allocation by throwing away possible elements.
+        let mut all = self.uninit.borrow_mut();
         // This must always be possible. `self.length` is nevery greater than the capacity.
-        self.uninit.borrow_mut().split_at(self.length).ok().unwrap()
+        let tail = all.split_at(self.length).unwrap();
+        (all, tail)
     }
 }
 
@@ -111,6 +133,11 @@ impl<'a, T> FixedVec<'a, T> {
             uninit,
             length: 0,
         }
+    }
+
+    /// Return trailing bytes that can not be used by the `FixedVec`.
+    pub fn shrink_to_fit(&mut self) -> Uninit<'a, ()> {
+        self.uninit.shrink_to_fit()
     }
 }
 
