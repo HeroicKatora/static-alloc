@@ -27,6 +27,18 @@ pub struct Uninit<'a, T: ?Sized> {
     lifetime: PhantomData<&'a mut T>,
 }
 
+/// A non-mutable view on a region used in an `Uninit`.
+///
+/// Makes it possible to utilize the traversal methods (`split*`, `cast*`, ..) without requiring a
+/// mutable reference to the original `Uninit`. It will also never expose mutable pointers or
+/// accidentally offer an aliased mutable reference. Prefer this to instead avoiding the borrow of
+/// the `Uninit` and manually managing pointers to the region.
+#[derive(Debug)]
+pub struct UninitView<'a, T: ?Sized>(
+    /// The region. The pointer in it must never be dereferenced mutably.
+    Uninit<'a, T>,
+);
+
 impl Uninit<'_, ()> {
     /// Create a uninit pointer from raw memory.
     ///
@@ -180,7 +192,9 @@ impl<'a, T> Uninit<'a, T> {
             // SAFETY:
             // * can only create instances where layout of `T` 'fits'
             // * valid for lifetime `'a` (as per unsafe constructor).
-            // * unaliased for lifetime `'a` (as per unsafe constructor).
+            // * unaliased for lifetime `'a` (as per unsafe constructor). No other method
+            //   duplicates the pointer or allows a second `Uninit` without borrowing the first.
+            //   `UninitView` does not offer this method.
             ptr::write(ptr, val);
             &mut *ptr
         }
@@ -198,10 +212,18 @@ impl<'a, T> Uninit<'a, [T]> {
 }
 
 impl<'a, T: ?Sized> Uninit<'a, T> {
+    pub fn borrow(&self) -> UninitView<'_, T> {
+        UninitView(Uninit {
+            ptr: self.ptr,
+            len: self.len,
+            lifetime: PhantomData,
+        })
+    }
+
     /// Borrow the `Uninit` region for a shorter duration.
     ///
     /// This is the equivalent of `&mut *mut_ref`.
-    pub fn borrow(&mut self) -> Uninit<'_, T> {
+    pub fn borrow_mut(&mut self) -> Uninit<'_, T> {
         Uninit {
             ptr: self.ptr,
             len: self.len,
@@ -248,5 +270,124 @@ impl<'a, T: ?Sized> Uninit<'a, T> {
     /// Turn this into a mutable reference to the content.
     pub unsafe fn into_mut(self) -> &'a mut T {
         &mut *self.as_ptr()
+    }
+}
+impl UninitView<'_, ()> {
+    pub fn split_at(self, at: usize) -> Result<(Self, Self), Self> {
+        let (head, tail) = self.0.split_at(at).map_err(UninitView)?;
+        Ok((UninitView(head), UninitView(tail)))
+    }
+
+    /// Split so that the second part fits the layout.
+    pub fn split_layout(self, layout: Layout) -> Result<(Self, Self), Self> {
+        let (head, tail) = self.0.split_layout(layout).map_err(UninitView)?;
+        Ok((UninitView(head), UninitView(tail)))
+    }
+}
+
+impl<'a> UninitView<'a, ()> {
+    /// Split so that the tail is aligned and valid for a `U`.
+    pub fn split_cast<U>(self) -> Result<(Self, UninitView<'a, U>), Self> {
+        let (this, split) = self.split_layout(Layout::new::<U>())?;
+        let cast = split.cast::<U>().ok().unwrap();
+        Ok((this, cast))
+    }
+
+    pub fn split_slice<U>(self) -> Result<(Self, UninitView<'a, [U]>), Self> {
+        let layout = Layout::for_value::<[U]>(&[]);
+        let (this, split) = self.split_layout(layout)?;
+        let cast = split.cast_slice::<U>().ok().unwrap();
+        Ok((this, cast))
+    }
+}
+
+impl<T> UninitView<'_, T> {
+    /// Invent a new uninit allocation for a zero-sized type (ZST).
+    ///
+    /// # Panics
+    /// This method panics when the type parameter is not a zero sized type.
+    pub fn invent_for_zst() -> Self {
+        UninitView(Uninit::invent_for_zst())
+    }
+}
+
+impl<'a, T> UninitView<'a, T> {
+    pub fn from_maybe_uninit(mem: &'a mem::MaybeUninit<T>) -> Self {
+        let ptr = ptr::NonNull::new(mem.as_ptr() as *mut T).unwrap();
+        let raw = unsafe {
+            // SAFETY:
+            // * unaliased as we had a mutable reference
+            // * we will not write through the pointer created
+            Uninit::from_memory(ptr.cast(), mem::size_of_val(mem))
+        };
+        UninitView(raw).cast().ok().unwrap()
+    }
+
+    pub fn cast<U>(self) -> Result<UninitView<'a, U>, Self> {
+        self.0.cast::<U>()
+            .map_err(UninitView)
+            .map(UninitView)
+    }
+
+    pub fn cast_slice<U>(self) -> Result<UninitView<'a, [U]>, Self> {
+        self.0.cast_slice::<U>()
+            .map_err(UninitView)
+            .map(UninitView)
+    }
+
+    /// Split off the tail that is not required to hold an instance of `T`.
+    pub fn shrink_to_fit(self) -> (Self, UninitView<'a, ()>) {
+        let (head, tail) = self.0.shrink_to_fit();
+        (UninitView(head), UninitView(tail))
+    }
+}
+
+impl<'a, T> UninitView<'a, [T]> {
+    pub fn as_begin_ptr(&self) -> *const T {
+        self.0.as_begin_ptr() as *const T
+    }
+
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+}
+
+impl<'a, T: ?Sized> UninitView<'a, T> {
+    pub fn borrow(&self) -> UninitView<'_, T> {
+        self.0.borrow()
+    }
+
+    /// Get the byte size of the total allocation.
+    pub fn size(&self) -> usize {
+        self.0.size()
+    }
+
+    /// Acquires the underlying `*const T` pointer.
+    pub fn as_ptr(&self) -> *const T {
+        self.0.as_ptr() as *const T
+    }
+
+    /// Acquires the underlying pointer as a `NonNull`.
+    pub fn as_non_null(&self) -> ptr::NonNull<T> {
+        self.0.as_non_null()
+    }
+
+    /// Dereferences the content.
+    ///
+    /// The resulting lifetime is bound to self so this behaves "as if" it were actually an
+    /// instance of T that is getting borrowed. If a longer lifetime is needed, use `into_ref`.
+    ///
+    /// ## Safety
+    /// The caller must ensure that the content has already been initialized.
+    pub unsafe fn as_ref(&self) -> &T {
+        self.0.as_ref()
+    }
+
+    /// Turn this into a reference to the content.
+    ///
+    /// ## Safety
+    /// The caller must ensure that the content has already been initialized.
+    pub unsafe fn into_ref(self) -> &'a T {
+        &*self.as_ptr()
     }
 }
