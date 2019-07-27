@@ -1,3 +1,9 @@
+//! The slab allocator.
+//!
+//! Basics of usage and the connection between the structs is discussed in the documentation of the
+//! [`Slab`] itself.
+//!
+//! [`Slab`]: struct.Slab.html
 use core::alloc::{GlobalAlloc, Layout};
 use core::cell::UnsafeCell;
 use core::mem::{self, MaybeUninit};
@@ -6,7 +12,7 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 
 use super::Uninit;
 
-/// An allocator drawing from an inner, statically sized memory resource.
+/// Allocator drawing from an inner, statically sized memory resource.
 ///
 /// The type parameter `T` is used only to annotate the required size and alignment of the region
 /// and has no futher use. Note that in particular there is no safe way to retrieve or unwrap an
@@ -152,7 +158,7 @@ pub struct LeakError<T> {
     failure: Failure,
 }
 
-/// A specific amount of consumed space of a slab.
+/// Specifies an amount of consumed space of a slab.
 ///
 /// Each allocation of the `Slab` increases the current level as they must not be empty. By
 /// ensuring that an allocation is performed at a specific level it is thus possible to check that
@@ -232,6 +238,11 @@ pub struct Allocation {
     pub level: Level,
 }
 
+/// Values of for some allocation including the [`Uninit`].
+///
+/// See [`Uninit`] for a better picture of the potential usage of this result.
+///
+/// [`Uninit`]: ../uninit/struct.Uninit.html
 #[derive(Debug)]
 pub struct UninitAllocation<'a, T=()> {
     /// Uninit pointer to the region with specified layout.
@@ -323,18 +334,52 @@ impl<T> Slab<T> {
         })
     }
 
+    /// Get an allocation with detailed layout.
+    ///
+    /// Provides an [`Uninit`] wrapping several aspects of initialization in a safe interface,
+    /// bound by the lifetime of the reference to the allocator.
+    ///
+    /// [`Uninit`]: ../uninit/struct.Uninit.html
     pub fn get_layout(&self, layout: Layout)
         -> Option<UninitAllocation<'_>>
     {
         self.try_alloc(layout)
     }
 
+    /// Get an allocation with detailed layout at a specific level.
+    ///
+    /// Provides an [`Uninit`] wrapping several aspects of initialization in a safe interface,
+    /// bound by the lifetime of the reference to the allocator.
+    ///
+    /// Since the underlying allocation is the same, it would be `unsafe` but justified to fuse
+    /// this allocation with the preceding or succeeding one.
+    ///
+    /// [`Uninit`]: ../uninit/struct.Uninit.html
     pub fn get_layout_at(&self, layout: Layout, at: Level)
         -> Result<UninitAllocation<'_>, Failure>
     {
         self.try_alloc_at(layout, at.0)
     }
 
+    /// Get an allocation for a specific type.
+    ///
+    /// It is not yet initialized but provides a safe interface for that initialization.
+    ///
+    /// ## Usage
+    ///
+    /// ```
+    /// # use static_alloc::Slab;
+    /// use core::cell::{Ref, RefCell};
+    ///
+    /// let slab: Slab<[Ref<'static, usize>; 1]> = Slab::uninit();
+    /// let data = RefCell::new(0xff);
+    ///
+    /// // We can place a `Ref` here but we did not yet.
+    /// let alloc = slab.get::<Ref<usize>>().unwrap();
+    /// let cell_ref = alloc.uninit.init(data.borrow());
+    ///
+    /// assert_eq!(**cell_ref, 0xff);
+    /// ```
     pub fn get<V>(&self) -> Option<UninitAllocation<V>> {
         if mem::size_of::<V>() == 0 {
             return Some(self.zst_fake_alloc());
@@ -350,6 +395,11 @@ impl<T> Slab<T> {
         })
     }
 
+    /// Get an allocation for a specific type at a specific level.
+    ///
+    /// See [`get`] for usage.
+    ///
+    /// [`get`]: #method.get
     pub fn get_at<V>(&self, level: Level) -> Result<UninitAllocation<V>, Failure> {
         if mem::size_of::<V>() == 0 {
             let fake = self.zst_fake_alloc();
