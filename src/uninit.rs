@@ -4,7 +4,7 @@
 //! not 'used' in any particular manner. See [the discussion of the unsafe working group][wg-ref].
 //!
 //! [wg-ref]: https://github.com/rust-lang/unsafe-code-guidelines/issues/77
-use core::{fmt, mem, ptr, slice};
+use core::{fmt, mem, ptr};
 use core::alloc::Layout;
 use core::marker::PhantomData;
 
@@ -83,7 +83,7 @@ pub struct UninitView<'a, T: ?Sized> {
     ///
     /// Note that `len` is always at least as large as the (minimum) size of `T`. Furthermore, the
     /// pointer is always correctly aligned to a `T`.
-    ptr: ptr::NonNull<T>,
+    ptr: ptr::NonNull<u8>,
 
     /// The actual length *in bytes*.
     ///
@@ -93,7 +93,7 @@ pub struct UninitView<'a, T: ?Sized> {
     /// Virtual lifetime to make this behave more similar to references.
     ///
     /// This borrows structures that hand out `Uninit` allocations.
-    lifetime: PhantomData<&'a mut T>,
+    lifetime: PhantomData<&'a T>,
 }
 
 impl Uninit<'_, ()> {
@@ -109,7 +109,7 @@ impl Uninit<'_, ()> {
     /// UB is `core::mem::MaybeUninit`.
     ///
     /// When in doubt, refactor code such that utilization of `from_maybe_uninit` is possible.
-    pub unsafe fn from_memory(ptr: ptr::NonNull<()>, len: usize) -> Self {
+    pub unsafe fn from_memory(ptr: ptr::NonNull<u8>, len: usize) -> Self {
         Uninit::from_presumed_mutable_view(UninitView {
             ptr,
             len,
@@ -249,13 +249,49 @@ impl<'a, T> Uninit<'a, T> {
             &mut *ptr
         }
     }
+
+    /// Acquires the underlying *mut pointer.
+    pub const fn as_ptr(&self) -> *mut T {
+        self.view.ptr.cast().as_ptr()
+    }
+
+    /// Acquires the underlying pointer as a `NonNull`.
+    pub const fn as_non_null(&self) -> ptr::NonNull<T> {
+        self.view.ptr.cast()
+    }
+
+    /// Dereferences the content.
+    ///
+    /// The resulting lifetime is bound to self so this behaves "as if" it were actually an
+    /// instance of T that is getting borrowed. If a longer lifetime is needed, use `into_ref`.
+    pub unsafe fn as_ref(&self) -> &T {
+        self.view.as_ref()
+    }
+
+    /// Mutably dereferences the content.
+    ///
+    /// The resulting lifetime is bound to self so this behaves "as if" it were actually an
+    /// instance of T that is getting borrowed. If a longer lifetime is needed, use `into_mut`.
+    pub unsafe fn as_mut(&mut self) -> &mut T {
+        &mut *self.as_ptr()
+    }
+
+    /// Turn this into a reference to the content.
+    pub unsafe fn into_ref(self) -> &'a T {
+        &*self.as_ptr()
+    }
+
+    /// Turn this into a mutable reference to the content.
+    pub unsafe fn into_mut(self) -> &'a mut T {
+        &mut *self.as_ptr()
+    }
 }
 
 impl<'a, T> Uninit<'a, [T]> {
     /// Creates a pointer to an empty slice.
     pub fn empty() -> Self {
         Uninit::from_presumed_mutable_view(UninitView {
-            ptr: <&'a mut [T]>::default().into(),
+            ptr: ptr::NonNull::from(<&'a mut [T]>::default()).cast(),
             len: 0,
             lifetime: PhantomData,
         })
@@ -277,32 +313,8 @@ impl<'a, T> Uninit<'a, [T]> {
     ///
     /// This is the pointer equivalent of `slice::split_at`.
     pub fn split_at(&mut self, at: usize) -> Option<Self> {
-        // TODO: we code this on our own since there is a real slice we create. This one would not
-        // be mutable and we can not rely on `UninitView::split_at`. But presumably, it would
-        // likely also be UB to access and memory from the pointer created from the reference of
-        // the slice.
-        // FIXME: do not create a slice. Either:
-        // * use the raw slice-pointer creating methods in nightly
-        // * never store a pointer to the slice but only to the memory
-        // NOTE: https://github.com/rust-lang/rust/issues/36925
-        let bytes = match at.checked_mul(mem::size_of::<T>()) {
-            None => return None,
-            Some(byte) if byte > self.view.len => return None,
-            Some(byte) => byte,
-        };
-
-        let next_len = self.view.len - bytes;
-        self.view.len = bytes;
-        // SAFETY: was previously in bounds.
-        let next_base = unsafe { self.as_begin_ptr().add(at) };
-        // SAFETY: 0 length (aliasing) but really in bounds as well.
-        let slice = unsafe { slice::from_raw_parts_mut(next_base, 0) };
-
-        Some(Uninit::from_presumed_mutable_view(UninitView {
-            ptr: slice.into(),
-            len: next_len,
-            lifetime: self.view.lifetime,
-        }))
+        self.view.split_at(at)
+            .map(Self::from_presumed_mutable_view)
     }
 
     /// Get the trailing bytes behind the slice.
@@ -375,42 +387,6 @@ impl<'a, T: ?Sized> Uninit<'a, T> {
     pub const fn size(&self) -> usize {
         self.view.size()
     }
-
-    /// Acquires the underlying *mut pointer.
-    pub const fn as_ptr(&self) -> *mut T {
-        self.view.ptr.as_ptr()
-    }
-
-    /// Acquires the underlying pointer as a `NonNull`.
-    pub const fn as_non_null(&self) -> ptr::NonNull<T> {
-        self.view.ptr
-    }
-
-    /// Dereferences the content.
-    ///
-    /// The resulting lifetime is bound to self so this behaves "as if" it were actually an
-    /// instance of T that is getting borrowed. If a longer lifetime is needed, use `into_ref`.
-    pub unsafe fn as_ref(&self) -> &T {
-        self.view.as_ref()
-    }
-
-    /// Mutably dereferences the content.
-    ///
-    /// The resulting lifetime is bound to self so this behaves "as if" it were actually an
-    /// instance of T that is getting borrowed. If a longer lifetime is needed, use `into_mut`.
-    pub unsafe fn as_mut(&mut self) -> &mut T {
-        self.view.ptr.as_mut()
-    }
-
-    /// Turn this into a reference to the content.
-    pub unsafe fn into_ref(self) -> &'a T {
-        &*self.as_ptr()
-    }
-
-    /// Turn this into a mutable reference to the content.
-    pub unsafe fn into_mut(self) -> &'a mut T {
-        &mut *self.as_ptr()
-    }
 }
 impl UninitView<'_, ()> {
     /// Create a uninit view from raw memory.
@@ -423,7 +399,7 @@ impl UninitView<'_, ()> {
     /// UB is `core::mem::MaybeUninit`.
     ///
     /// When in doubt, refactor code such that utilization of `from_maybe_uninit` is possible.
-    pub unsafe fn from_memory(ptr: ptr::NonNull<()>, len: usize) -> Self {
+    pub unsafe fn from_memory(ptr: ptr::NonNull<u8>, len: usize) -> Self {
         UninitView {
             ptr,
             len,
@@ -437,7 +413,8 @@ impl UninitView<'_, ()> {
     ///
     /// [`Uninit::split_layout`]: ./struct.Uninit.html#method.split_layout
     pub fn split_layout(&mut self, layout: Layout) -> Option<Self> {
-        let align = self.ptr.cast::<u8>().as_ptr().align_offset(layout.align());
+        let align = self.ptr.as_ptr()
+            .align_offset(layout.align());
         let aligned_len = self.len
             .checked_sub(align)
             .and_then(|len| len.checked_sub(layout.size()));
@@ -507,7 +484,7 @@ impl<'a, T> UninitView<'a, T> {
             return None;
         }
 
-        let base = self.ptr.cast::<u8>().as_ptr();
+        let base = self.ptr.as_ptr();
         // SAFETY: by `from_memory`, all offsets `< len` are within the allocation.
         // In particular, no pointer within or one-past-the-end is null.
         let next_base = unsafe { ptr::NonNull::new_unchecked(base.add(at)) };
@@ -556,13 +533,8 @@ impl<'a, T> UninitView<'a, T> {
             return Err(self)
         }
 
-        let slice = unsafe {
-            // SAFETY: correctly aligned and empty.
-            slice::from_raw_parts_mut(self.ptr.cast().as_ptr(), 0)
-        };
-
         Ok(UninitView {
-            ptr: slice.into(),
+            ptr: self.ptr,
             len: self.len,
             lifetime: PhantomData,
         })
@@ -571,6 +543,35 @@ impl<'a, T> UninitView<'a, T> {
     /// Split off the tail that is not required for holding an instance of `T`.
     pub fn split_to_fit(&mut self) -> UninitView<'a, ()> {
         self.split_at_byte(mem::size_of::<T>()).unwrap()
+    }
+
+    /// Acquires the underlying `*const T` pointer.
+    pub const fn as_ptr(&self) -> *const T {
+        self.ptr.as_ptr() as *const T
+    }
+
+    /// Acquires the underlying pointer as a `NonNull`.
+    pub fn as_non_null(&self) -> ptr::NonNull<T> {
+        self.ptr.cast()
+    }
+
+    /// Dereferences the content.
+    ///
+    /// The resulting lifetime is bound to self so this behaves "as if" it were actually an
+    /// instance of T that is getting borrowed. If a longer lifetime is needed, use `into_ref`.
+    ///
+    /// ## Safety
+    /// The caller must ensure that the content has already been initialized.
+    pub unsafe fn as_ref(&self) -> &T {
+        self.into_ref()
+    }
+
+    /// Turn this into a reference to the content.
+    ///
+    /// ## Safety
+    /// The caller must ensure that the content has already been initialized.
+    pub unsafe fn into_ref(self) -> &'a T {
+        &*self.as_ptr()
     }
 }
 
@@ -581,7 +582,7 @@ impl<'a, T> UninitView<'a, [T]> {
     /// use it as an `Uninit`.
     pub fn empty() -> Self {
         UninitView {
-            ptr: <&'a [T]>::default().into(),
+            ptr: ptr::NonNull::from(<&'a [T]>::default()).cast(),
             len: 0,
             lifetime: PhantomData,
         }
@@ -601,6 +602,9 @@ impl<'a, T> UninitView<'a, [T]> {
 
     /// Split the slice at an index.
     pub fn split_at(&mut self, at: usize) -> Option<Self> {
+        // NOTE: Slice pointers are blocked by Rust stabilization we can not create one from a real
+        // reference to slice as that would restrict us to the memory covered by the reference.
+        // NOTE: Tracked here https://github.com/rust-lang/rust/issues/36925
         let bytes = match at.checked_mul(mem::size_of::<T>()) {
             None => return None,
             Some(byte) if byte > self.len => return None,
@@ -609,16 +613,14 @@ impl<'a, T> UninitView<'a, [T]> {
 
         let next_len = self.len - bytes;
         self.len = bytes;
-        // SAFETY: was previously in bounds.
-        let next_base = unsafe { self.as_begin_ptr().add(at) };
-        // SAFETY: 0 length (aliasing) but really in bounds as well.
-        let slice = unsafe { slice::from_raw_parts(next_base, 0) };
 
-        Some(UninitView {
-            ptr: slice.into(),
-            len: next_len,
-            lifetime: self.lifetime,
-        })
+        let base = self.ptr.as_ptr();
+        // SAFETY: was previously in bounds.
+        let next_base = unsafe { ptr::NonNull::new_unchecked(base.add(bytes)) };
+
+        // SAFETY: total allocation length at least `self.len + next_len`.
+        let other = unsafe { UninitView::from_memory(next_base, next_len) };
+        Some(other.cast_slice().unwrap())
     }
 
     /// Get the trailing bytes behind the slice.
@@ -660,35 +662,6 @@ impl<'a, T: ?Sized> UninitView<'a, T> {
     /// Get the byte size of the total allocation.
     pub const fn size(&self) -> usize {
         self.len
-    }
-
-    /// Acquires the underlying `*const T` pointer.
-    pub const fn as_ptr(&self) -> *const T {
-        self.ptr.as_ptr() as *const T
-    }
-
-    /// Acquires the underlying pointer as a `NonNull`.
-    pub fn as_non_null(&self) -> ptr::NonNull<T> {
-        self.ptr
-    }
-
-    /// Dereferences the content.
-    ///
-    /// The resulting lifetime is bound to self so this behaves "as if" it were actually an
-    /// instance of T that is getting borrowed. If a longer lifetime is needed, use `into_ref`.
-    ///
-    /// ## Safety
-    /// The caller must ensure that the content has already been initialized.
-    pub unsafe fn as_ref(&self) -> &T {
-        self.ptr.as_ref()
-    }
-
-    /// Turn this into a reference to the content.
-    ///
-    /// ## Safety
-    /// The caller must ensure that the content has already been initialized.
-    pub unsafe fn into_ref(self) -> &'a T {
-        &*self.as_ptr()
     }
 }
 
