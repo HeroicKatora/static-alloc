@@ -49,6 +49,7 @@
 
 // Copyright 2019 Andreas Molzer
 #![no_std]
+#[deny(missing_docs)]
 
 pub mod slab;
 pub mod uninit;
