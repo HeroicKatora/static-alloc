@@ -1,3 +1,8 @@
+## v0.0.5
+
+- Introduces `Uninit`, a lifetime tracked pointed to uninitialized memory.
+- Introduces `FixedVec`, a capacity bound `Vec` equivalent built on the above.
+
 ## v0.0.4
 
 - Fixed a bug where ZSTs had their Drop impl executed while leaking them
