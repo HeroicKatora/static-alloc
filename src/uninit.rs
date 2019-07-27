@@ -591,6 +591,18 @@ impl<'a, T: ?Sized> UninitView<'a, T> {
     }
 }
 
+impl<'a, T> From<&'a mut mem::MaybeUninit<T>> for Uninit<'a, T> {
+    fn from(mem: &'a mut mem::MaybeUninit<T>) -> Self {
+        Uninit::from_maybe_uninit(mem)
+    }
+}
+
+impl<'a, T> From<&'a mem::MaybeUninit<T>> for UninitView<'a, T> {
+    fn from(mem: &'a mem::MaybeUninit<T>) -> Self {
+        UninitView::from_maybe_uninit(mem)
+    }
+}
+
 impl<T: ?Sized> fmt::Debug for Uninit<'_, T> {
    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
        f.debug_tuple("Uninit")

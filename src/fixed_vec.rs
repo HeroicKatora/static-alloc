@@ -190,7 +190,7 @@ mod tests {
         const CAPACITY: usize = 30;
 
         let mut allocation: MaybeUninit<[Foo; CAPACITY]> = MaybeUninit::uninit();
-        let mut vec = FixedVec::from_available(Uninit::from_maybe_uninit(&mut allocation));
+        let mut vec = FixedVec::from_available((&mut allocation).into());
 
         assert_eq!(vec.capacity(), CAPACITY);
         assert_eq!(vec.len(), 0);
@@ -223,7 +223,7 @@ mod tests {
 
 
         let mut allocation: MaybeUninit<[HasDrop; COUNT]> = MaybeUninit::uninit();
-        let mut vec = FixedVec::from_available(Uninit::from_maybe_uninit(&mut allocation));
+        let mut vec = FixedVec::from_available((&mut allocation).into());
 
         for i in 0..COUNT {
             assert!(vec.push(HasDrop(i)).is_ok());
@@ -236,9 +236,7 @@ mod tests {
     #[test]
     fn zst() {
         struct Zst;
-
         let mut vec = FixedVec::<Zst>::new(Uninit::empty());
-
         assert_eq!(vec.capacity(), usize::max_value());
     }
 
@@ -246,7 +244,8 @@ mod tests {
     fn split_and_shrink() {
         // Zeroed because we want to test the contents.
         let mut allocation: MaybeUninit<[u16; 8]> = MaybeUninit::zeroed();
-        let mut aligned = Uninit::from_maybe_uninit(&mut allocation).as_memory();
+
+        let mut aligned = Uninit::from(&mut allocation).as_memory();
         let _ = aligned.split_at_byte(15);
 
         let mut vec = FixedVec::from_available(aligned);
