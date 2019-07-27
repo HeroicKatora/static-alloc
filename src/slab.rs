@@ -1,3 +1,9 @@
+//! The slab allocator.
+//!
+//! Basics of usage and the connection between the structs is discussed in the documentation of the
+//! [`Slab`] itself.
+//!
+//! [`Slab`]: struct.Slab.html
 use core::alloc::{GlobalAlloc, Layout};
 use core::cell::UnsafeCell;
 use core::mem::{self, MaybeUninit};
@@ -6,7 +12,7 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 
 use super::Uninit;
 
-/// An allocator drawing from an inner, statically sized memory resource.
+/// Allocator drawing from an inner, statically sized memory resource.
 ///
 /// The type parameter `T` is used only to annotate the required size and alignment of the region
 /// and has no futher use. Note that in particular there is no safe way to retrieve or unwrap an
@@ -152,7 +158,7 @@ pub struct LeakError<T> {
     failure: Failure,
 }
 
-/// A specific amount of consumed space of a slab.
+/// Specifies an amount of consumed space of a slab.
 ///
 /// Each allocation of the `Slab` increases the current level as they must not be empty. By
 /// ensuring that an allocation is performed at a specific level it is thus possible to check that
@@ -232,7 +238,7 @@ pub struct Allocation {
     pub level: Level,
 }
 
-/// An [`Uninit`] for some allocation.
+/// Values of for some allocation including the [`Uninit`].
 ///
 /// See [`Uninit`] for a better picture of the potential usage of this result.
 ///
