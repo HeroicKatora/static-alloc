@@ -1,0 +1,199 @@
+//! A pointer type for allocation with RAII semantics.
+//!
+//! See [`Box`] for more information.
+//!
+//! [`Box`]: struct.Box.html
+use core::{borrow, cmp, fmt, hash, mem, ops, ptr};
+use crate::uninit::Uninit;
+
+/// An allocated instance of a type.
+///
+/// ## Design
+/// You will likely notice quickly that this has different semantics than the `std::boxed::Box`.
+/// Its inner pointer may be larger and it does not allocate nor deallocate memory on its own. This
+/// only wraps a fully initialized `Uninit` in a RAII/`Drop` interface.
+///
+/// Of course, there is a reason for this choice. The standard `Box`, storing only the raw pointer
+/// (as a `Unique`), requires its underlying allocation to have the *exact* same size and align
+/// (`Layout`) as the value and the layout needs to be recalculated when deallocating. Without a
+/// dependency on an allocator it would seem that the underlying layout becomes less important and
+/// can be thrown away but the opposite is the case. Many converters for the `std::boxed::Box` rely
+/// on being able to reallocate into a suitably constructed new allocation on will. Not having this
+/// luxury at our disposal means there should be a mechanism to cope with mismatching allocations
+/// anyways. So we simply store the full `Uninit` provided, relying on the library user to manage
+/// other aspects of allocation for us.
+///
+/// Instead, this `Box` can offer additional ways to manipulate and massage the underlying
+/// allocation. It should be possible to restore the exact allocation `Box` semantics (albeit with
+/// one `usize` more space usage) via a wrapper when an allocator is available.
+pub struct Box<'a, T> {
+    inner: Uninit<'a, T>,
+}
+
+impl<'a, T> Box<'a, T> {
+    /// Place `val` into a provided allocation.
+    pub fn new(val: T, mut into: Uninit<'a, T>) -> Self {
+        into.borrow_mut().init(val);
+
+        Box {
+            inner: into,
+        }
+    }
+
+    /// Create a box from an pointer to an already initialized value.
+    ///
+    /// Ensures that an already initialized value is properly dropped at the end of the lifetime of
+    /// the `Box`.
+    ///
+    /// ## Safety
+    /// The pointed-to location must have already been initialized via external means. This is as
+    /// unsafe as `init.as_mut()`.
+    pub unsafe fn from_raw(init: Uninit<'a, T>) -> Self {
+        Box {
+            inner: init,
+        }
+    }
+
+    /// Unwrap the contained `Uninit`.
+    ///
+    /// The value stays initialized but that information is no longer statically available. If you
+    /// simply want to avoid the `Drop` call, consider `ManuallyDrop` instead.
+    pub fn into_raw(b: Self) -> Uninit<'a, T> {
+        let ptr = b.inner.as_non_null();
+        let len = b.inner.size();
+        mem::forget(b);
+        unsafe {
+            // SAFETY: restored the `Uninit` we just forgot.
+            Uninit::from_memory(ptr.cast(), len).cast().unwrap()
+        }
+    }
+
+    /// Consumes and leaks the Box, returning a mutable reference, `&'a mut T`.
+    ///
+    /// Compared to a standard `Box` it should be noted that the reference alone is not enough
+    /// to invoke `Box::from_raw`.
+    pub fn leak(b: Self) -> &'a mut T {
+        let raw = Self::into_raw(b);
+        // SAFETY: still initialized
+        unsafe { raw.into_mut() }
+    }
+
+    /// Take out the value and return the allocation.
+    ///
+    /// This function is the opposite of `new`.
+    pub fn take(b: Self) -> (T, Uninit<'a, T>) {
+        let val = unsafe { b.inner.read() };
+        (val, Self::into_raw(b))
+    }
+}
+
+impl<T> Drop for Box<'_, T> {
+    fn drop(&mut self) {
+        unsafe {
+            ptr::drop_in_place(self.inner.as_ptr())
+        }
+    }
+}
+
+impl<T> ops::Deref for Box<'_, T> {
+    type Target = T;
+
+    fn deref(&self) -> &T {
+        unsafe {
+            self.inner.as_ref()
+        }
+    }
+}
+
+impl<T> ops::DerefMut for Box<'_, T> {
+    fn deref_mut(&mut self) -> &mut T {
+        unsafe {
+            self.inner.as_mut()
+        }
+    }
+}
+
+impl<'a, 'b, T: PartialEq> PartialEq<Box<'b, T>> for Box<'a, T> {
+    #[inline]
+    fn eq(&self, other: &Box<T>) -> bool {
+        PartialEq::eq(&**self, &**other)
+    }
+    #[inline]
+    fn ne(&self, other: &Box<T>) -> bool {
+        PartialEq::ne(&**self, &**other)
+    }
+}
+
+impl<'a, 'b, T: PartialOrd> PartialOrd<Box<'b, T>> for Box<'a, T> {
+    #[inline]
+    fn partial_cmp(&self, other: &Box<T>) -> Option<cmp::Ordering> {
+        PartialOrd::partial_cmp(&**self, &**other)
+    }
+    #[inline]
+    fn lt(&self, other: &Box<T>) -> bool {
+        PartialOrd::lt(&**self, &**other)
+    }
+    #[inline]
+    fn le(&self, other: &Box<T>) -> bool {
+        PartialOrd::le(&**self, &**other)
+    }
+    #[inline]
+    fn ge(&self, other: &Box<T>) -> bool {
+        PartialOrd::ge(&**self, &**other)
+    }
+    #[inline]
+    fn gt(&self, other: &Box<T>) -> bool {
+        PartialOrd::gt(&**self, &**other)
+    }
+}
+
+impl<T: Ord> Ord for Box<'_, T> {
+    #[inline]
+    fn cmp(&self, other: &Box<T>) -> cmp::Ordering {
+        Ord::cmp(&**self, &**other)
+    }
+}
+
+impl<T: Eq> Eq for Box<'_, T> { }
+
+impl<T: hash::Hash> hash::Hash for Box<'_, T> {
+    fn hash<H: hash::Hasher>(&self, state: &mut H) {
+        (**self).hash(state)
+    }
+}
+
+impl<T: fmt::Debug> fmt::Debug for Box<'_, T> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        fmt::Debug::fmt(&**self, f)
+    }
+}
+
+impl<T> fmt::Pointer for Box<'_, T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Pointer::fmt(&self.inner.as_ptr(), f)
+    }
+}
+
+impl<T> borrow::Borrow<T> for Box<'_, T> {
+    fn borrow(&self) -> &T {
+        &**self
+    }
+}
+
+impl<T> borrow::BorrowMut<T> for Box<'_, T> {
+    fn borrow_mut(&mut self) -> &mut T {
+        &mut **self
+    }
+}
+
+impl<T> AsRef<T> for Box<'_, T> {
+    fn as_ref(&self) -> &T {
+        &**self
+    }
+}
+
+impl<T> AsMut<T> for Box<'_, T> {
+    fn as_mut(&mut self) -> &mut T {
+        &mut **self
+    }
+}
