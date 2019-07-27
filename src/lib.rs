@@ -21,6 +21,25 @@
 //! }
 //! ```
 //!
+//! `FixedVec` without forced `Clone` or `Copy` semantics:
+//!
+//! ```rust
+//! use static_alloc::{FixedVec, Uninit};
+//! use core::mem::MaybeUninit;
+//!
+//! let mut pool: MaybeUninit<[u8; 1024]> = MaybeUninit::uninit();
+//! let mut vec = FixedVec::from_available(Uninit::from(&mut pool));
+//!
+//! let mut num = 0;
+//! // Push a mutable reference, not `Copy` nor `Clone`!
+//! vec.push(&mut num);
+//!
+//! *vec.pop().unwrap() = 4;
+//! drop(vec);
+//!
+//! assert_eq!(num, 4);
+//! ```
+//!
 //! ## Why the name?
 //!
 //! This crates makes it safe to define a *static* object and to then use its memory to *allocate*
@@ -32,8 +51,12 @@
 #![no_std]
 
 pub mod slab;
+pub mod uninit;
+pub mod fixed_vec;
 
-pub use crate::slab::Slab;
+pub use fixed_vec::FixedVec;
+pub use uninit::Uninit;
+pub use slab::Slab;
 
 // Can't use the macro-call itself within the `doc` attribute. So force it to eval it as part of
 // the macro invocation.

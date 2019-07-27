@@ -1,8 +1,10 @@
 use core::alloc::{GlobalAlloc, Layout};
 use core::cell::UnsafeCell;
 use core::mem::{self, MaybeUninit};
-use core::ptr::{self, NonNull, null_mut};
+use core::ptr::{NonNull, null_mut};
 use core::sync::atomic::{AtomicUsize, Ordering};
+
+use super::Uninit;
 
 /// An allocator drawing from an inner, statically sized memory resource.
 ///
@@ -230,6 +232,15 @@ pub struct Allocation {
     pub level: Level,
 }
 
+#[derive(Debug)]
+pub struct UninitAllocation<'a, T=()> {
+    /// Uninit pointer to the region with specified layout.
+    pub uninit: Uninit<'a, T>,
+
+    /// The observed amount of consumed bytes after the allocation.
+    pub level: Level,
+}
+
 /// Reason for a failed allocation at an exact [`Level`].
 ///
 /// [`Level`]: struct.Level.html
@@ -290,17 +301,7 @@ impl<T> Slab<T> {
     /// `GlobalAlloc` this is explicitely forbidden to request and would allow any behaviour but we
     /// instead strictly check it.
     pub fn alloc(&self, layout: Layout) -> Option<NonNull<u8>> {
-        assert!(layout.size() > 0, "Violated allocation requirement: Requested region of size 0");
-
-        // Guess zero, this will fail when we try to access it and it isn't.
-        let mut consumed = 0;
-        loop {
-            match self.try_alloc(layout, consumed) {
-                Ok(Allocation { ptr, .. }) => return Some(ptr),
-                Err(Failure::Exhausted) => return None,
-                Err(Failure::Mismatch{ observed }) => consumed = observed.0,
-            }
-        }
+        Some(self.try_alloc(layout)?.uninit.as_non_null().cast())
     }
 
     /// Try to allocate some layout with a precise base location.
@@ -314,7 +315,61 @@ impl<T> Slab<T> {
     pub fn alloc_at(&self, layout: Layout, level: Level)
         -> Result<Allocation, Failure>
     {
-        self.try_alloc(layout, level.0)
+        let UninitAllocation { uninit, level } = self.try_alloc_at(layout, level.0)?;
+
+        Ok(Allocation {
+            ptr: uninit.as_non_null().cast(),
+            level,
+        })
+    }
+
+    pub fn get_layout(&self, layout: Layout)
+        -> Option<UninitAllocation<'_>>
+    {
+        self.try_alloc(layout)
+    }
+
+    pub fn get_layout_at(&self, layout: Layout, at: Level)
+        -> Result<UninitAllocation<'_>, Failure>
+    {
+        self.try_alloc_at(layout, at.0)
+    }
+
+    pub fn get<V>(&self) -> Option<UninitAllocation<V>> {
+        if mem::size_of::<V>() == 0 {
+            return Some(self.zst_fake_alloc());
+        }
+
+        let layout = Layout::new::<V>();
+        let UninitAllocation { uninit, level, } = self.try_alloc(layout)?;
+
+        Some(UninitAllocation {
+            // UNWRAP: it has exactly the requested size of `V`.
+            uninit: uninit.cast().ok().unwrap(),
+            level,
+        })
+    }
+
+    pub fn get_at<V>(&self, level: Level) -> Result<UninitAllocation<V>, Failure> {
+        if mem::size_of::<V>() == 0 {
+            let fake = self.zst_fake_alloc();
+            // Note: zst_fake_alloc is a noop on the level, we may as well check after.
+            if fake.level != level {
+                return Err(Failure::Mismatch {
+                    observed: fake.level,
+                });
+            }
+            return Ok(fake);
+        }
+
+        let layout = Layout::new::<V>();
+        let UninitAllocation { uninit, level, } = self.try_alloc_at(layout, level.0)?;
+
+        Ok(UninitAllocation {
+            // UNWRAP: it has exactly the requested size of `V`.
+            uninit: uninit.cast().ok().unwrap(),
+            level,
+        })
     }
 
     /// Observe the current level.
@@ -327,6 +382,20 @@ impl<T> Slab<T> {
         Level(self.consumed.load(Ordering::SeqCst))
     }
 
+    fn try_alloc(&self, layout: Layout)
+        -> Option<UninitAllocation<'_>>
+    {
+        // Guess zero, this will fail when we try to access it and it isn't.
+        let mut consumed = 0;
+        loop {
+            match self.try_alloc_at(layout, consumed) {
+                Ok(alloc) => return Some(alloc),
+                Err(Failure::Exhausted) => return None,
+                Err(Failure::Mismatch{ observed }) => consumed = observed.0,
+            }
+        }
+    }
+
     /// Try to allocate some layout with a precise base location.
     ///
     /// The base location is the currently consumed byte count, without correction for the
@@ -335,8 +404,8 @@ impl<T> Slab<T> {
     ///
     /// # Panics
     /// This function panics if `expect_consumed` is larger than `length`.
-    fn try_alloc(&self, layout: Layout, expect_consumed: usize)
-        -> Result<Allocation, Failure>
+    fn try_alloc_at(&self, layout: Layout, expect_consumed: usize)
+        -> Result<UninitAllocation<'_>, Failure>
     {
         assert!(layout.size() > 0);
         let length = mem::size_of::<T>();
@@ -385,8 +454,14 @@ impl<T> Slab<T> {
             (base_ptr as *mut u8).add(at_aligned)
         };
 
-        Ok(Allocation {
-            ptr: NonNull::new(aligned).unwrap(),
+        let ptr = NonNull::new(aligned).unwrap();
+        let uninit = unsafe {
+            // SAFETY: memory is valid and unaliased for the lifetime of our reference.
+            Uninit::from_memory(ptr.cast(), requested)
+        };
+
+        Ok(UninitAllocation {
+            uninit,
             level: Level(new_consumed),
         })
     }
@@ -449,20 +524,9 @@ impl<T> Slab<T> {
     /// [`ptr::slice_from_raw_parts`]: https://github.com/rust-lang/rust/issues/36925
     /// [`ManuallyDrop::drop`]: https://doc.rust-lang.org/beta/std/mem/struct.ManuallyDrop.html#method.drop
     pub fn leak<V>(&self, val: V) -> Result<&mut V, LeakError<V>> {
-        let ptr = if mem::size_of::<V>() == 0 {
-            return Ok(self.zst_fake_alloc(val));
-        } else {
-            match self.alloc(Layout::new::<V>()) {
-                Some(ptr) => ptr.as_ptr() as *mut V,
-                None => return Err(LeakError::new(val, Failure::Exhausted)),
-            }
-        };
-
-        unsafe {
-            // SAFETY: ptr is valid for write, non-null, aligned according to V's layout.
-            ptr::write(ptr, val);
-            // SAFETY: ptr points into `self`, and reference is unique.
-            Ok(&mut *ptr)
+        match self.get::<V>() {
+            Some(alloc) => Ok(alloc.uninit.init(val)),
+            None => Err(LeakError::new(val, Failure::Exhausted)),
         }
     }
 
@@ -499,45 +563,21 @@ impl<T> Slab<T> {
     pub fn leak_at<V>(&self, val: V, level: Level)
         -> Result<(&mut V, Level), LeakError<V>>
     {
-        if mem::size_of::<V>() == 0 {
-            let observed = self.level();
-
-            if level != observed {
-                return Err(LeakError::new(val, Failure::Mismatch {
-                    observed,
-                }));
-            }
-
-            return Ok((self.zst_fake_alloc(val), level));
-        }
-
-        let alloc = match self.alloc_at(Layout::new::<V>(), level) {
+        let alloc = match self.get_at::<V>(level) {
             Ok(alloc) => alloc,
             Err(err) => return Err(LeakError::new(val, err)),
         };
 
-        let ptr = alloc.ptr.as_ptr() as *mut V;
-
-        unsafe {
-            // SAFETY: ptr is valid for write, non-null, aligned according to V's layout.
-            ptr::write(ptr, val);
-            // SAFETY: ptr points into `self`, and reference is unique.
-            Ok((&mut *ptr, alloc.level))
-        }
+        let mutref = alloc.uninit.init(val);
+        Ok((mutref, alloc.level))
     }
 
     /// 'Allocate' a ZST.
-    fn zst_fake_alloc<Z>(&self, val: Z) -> &mut Z {
-        assert_eq!(mem::size_of::<Z>(), 0);
-        let ptr = NonNull::<Z>::dangling().as_ptr();
-
-        // SAFETY: The pointer is suitably aligned and non-zero.
-        // This is equivalent to `mem::forget` but semantically more sensible.
-        unsafe { ptr::write(ptr, val); }
-
-        // SAFETY: RawVec does this as well. Probably safe, only zero offsets in gep-inbounds.
-        // See https://github.com/rust-lang/unsafe-code-guidelines/issues/93
-        unsafe { &mut *ptr }
+    fn zst_fake_alloc<Z>(&self) -> UninitAllocation<Z> {
+        UninitAllocation {
+            uninit: Uninit::invent_for_zst(),
+            level: self.level(),
+        }
     }
 
     /// Try to bump the monotonic, atomic consume counter.
