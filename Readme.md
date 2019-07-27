@@ -22,6 +22,8 @@ introducing new dependencies and *should* contain no non-optional dependency.
 
 ## Usage
 
+As a global allocator for `alloc`:
+
 ```rust
 use static_alloc::Slab;
 
@@ -39,6 +41,22 @@ fn main() {
 
     println!("{:x?}", &buffer[..]);
 }
+```
+
+As local memory pools for fixed capacity `FixedVec`:
+
+```rust
+use static_alloc::{FixedVec, Uninit};
+use core::mem::MaybeUninit;
+
+let mut pool: MaybeUninit<[u8; 1024]> = MaybeUninit::uninit();
+let mut vec = FixedVec::from_available(Uninit::from(&mut pool));
+
+let mut num = 0;
+// Push a mutable reference, not `Copy` nor `Clone`!
+vec.push(&mut num);
+
+# drop(vec);
 ```
 
 ## Additional
