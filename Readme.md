@@ -4,21 +4,25 @@ General purpose global allocator(s) with static storage.
 
 ## Goal and Target Platform
 
-Provides an allocator for extremely resource constrained environments where the
-only memory guaranteed is your program's image in memory as provided by the
-loader. Possible use cases are OS-less development, embedded, bootloaders (even
+Provides allocator based data structures for extremely resource constrained
+environments where the only memory guaranteed is your program's image in memory
+as provided by the loader. This includes a `Slab`-allocator and a `FixedVec`.
+
+Possible use cases are OS-less development, embedded, bootloaders (even
 stage0/1 maybe, totally untested). The primary goals are minimalism,
 simplicity, and correctness.
 
-This library is far from complete, and contributions with bug fixes or more
-allocators are welcome. As a general principle those should provide mechanisms,
-not policy, have a usable direct api that does not require them to be
-registered as the single global allocator.
+This library aims to provide functionality similar to the standard `alloc`
+crate. It is obviously far from complete, and contributions with bug fixes or
+more allocators are welcome. As a general principle those should provide
+mechanisms, not policy, have a usable direct api that does not require them to
+override any singleton such as the single global allocator.
 
 Feature requests and 'help' issues will be closed, drafts will be decided on
-the spot. With simplicity in mind, ideas that can not be put into a draft form
-are likely too complex anyways. PRs should be extremely reluctant with
-introducing new dependencies and *should* contain no non-optional dependency.
+the spot. Whatever submitted should have simplicity and composability in mind,
+ideas that can not be put into a draft form are likely too complex or not
+focussed enough. PRs should be *extremely* reluctant with introducing new
+dependencies and *should* contain no non-optional dependency.
 
 ## Usage
 
@@ -48,14 +52,17 @@ As local memory pools for fixed capacity `FixedVec`:
 use static_alloc::{FixedVec, Uninit};
 use core::mem::MaybeUninit;
 
-let mut pool: MaybeUninit<[u8; 1024]> = MaybeUninit::uninit();
-let mut vec = FixedVec::from_available(Uninit::from(&mut pool));
+let mut pool = MaybeUninit::<[u8; 1024]>::uninit();
+let memory = Uninit::from(&mut pool);
+let mut vector = FixedVec::from_available(memory);
 
 let mut num = 0;
-// Push a mutable reference, not `Copy` nor `Clone`!
-vec.push(&mut num);
+// Push mutable ref, not `'static`, `Copy` nor `Clone`!
+vector.push(&mut num);
+*vector[0] = 42;
 
-# drop(vec);
+drop(vector);
+assert_eq!(num, 42);
 ```
 
 ## Additional

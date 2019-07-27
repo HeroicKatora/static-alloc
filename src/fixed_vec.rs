@@ -1,9 +1,45 @@
+//! Contains the `FixedVec` implementation.
+//!
+//! [See `FixedVec` for the main information][`FixedVec`].
+//!
+//! [`FixedVec`]: struct.FixedVec.html
 use core::{ops, ptr, slice};
 use crate::uninit::Uninit;
 
 /// A `Vec`-like structure that does not manage its allocation.
 ///
-/// This vector type will never (re-)allocate but it can also not free underused memory.
+/// This vector type will never (re-)allocate but it can also not free underused memory. As opposed
+/// to other similar crates, it does require and additional bounds on its type parameter as it
+/// truly manages uninitialized memory to store instances.
+///
+/// # Basic Usage
+///
+/// # Advanaced Usage
+///
+/// One focus of the library is composability. It should not be surprising that `FixedVec`
+/// interacts with the [`Slab`] allocator, which implements a specialized interface providing the
+/// [`Uninit`] type instead of a raw `*const u8`. Hence, the `FixedVec` can use this instead of its
+/// own local stack variables.
+///
+/// ```
+/// # use static_alloc::{FixedVec, Slab};
+/// # use core::alloc::Layout;
+/// let alloc: Slab<[u8; 1 << 12]> = Slab::uninit();
+/// let some_usize = alloc.leak(0_usize).unwrap();
+///
+/// let mut vec: FixedVec<&usize> = FixedVec::from_available(
+///     alloc.get_layout(Layout::new::<[&usize; 1]>()).unwrap().uninit);
+/// // Push the reference to the other allocation.
+/// vec.push(some_usize);
+///
+/// // … do something else
+///
+/// // Ensure lifetimes work out.
+/// drop(vec);
+/// ```
+///
+/// [`Slab`]: ../slab/struct.Slab.html
+/// [`Uninit`]: ../uninit/struct.Uninit.html
 pub struct FixedVec<'a, T> {
     uninit: Uninit<'a, [T]>,
     length: usize,
