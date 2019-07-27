@@ -53,10 +53,8 @@ impl<T> FixedVec<'_, T> {
     ///
     /// // Only enough storage for one element.
     /// let mut allocation: MaybeUninit<[u32; 1]> = MaybeUninit::uninit();
-    /// let storage = Uninit::from_maybe_uninit(&mut allocation)
-    ///     .cast_slice::<u32>()
-    ///     .ok().expect("Everything fine for storings Foo's");
-    /// let mut vec = FixedVec::new(storage);
+    /// let uninit = Uninit::from_maybe_uninit(&mut allocation);
+    /// let mut vec = FixedVec::from_available(uninit);
     ///
     /// // First push succeeds.
     /// assert_eq!(vec.push(1), Ok(()));
@@ -125,7 +123,7 @@ impl<T> FixedVec<'_, T> {
 }
 
 impl<'a, T> FixedVec<'a, T> {
-    /// Create a `Vec` in a pre-allocated region.
+    /// Create a `FixedVec` in a pre-allocated region.
     ///
     /// The capacity will be that of the underlying allocation.
     pub fn new(uninit: Uninit<'a, [T]>) -> Self {
@@ -135,7 +133,21 @@ impl<'a, T> FixedVec<'a, T> {
         }
     }
 
+    /// Create a `FixedVec` with as large of a capacity as available.
+    ///
+    /// When no aligned slice can be create within the provided memory then the constructor will
+    /// fallback to an empty dangling slice.
+    ///
+    /// This is only a utility function.
+    pub fn from_available<U>(generic: Uninit<'a, U>) -> Self {
+        let mut uninit = generic.as_memory();
+        let slice = uninit.split_slice().unwrap_or_else(Uninit::empty);
+        Self::new(slice)
+    }
+
     /// Return trailing bytes that can not be used by the `FixedVec`.
+    ///
+    /// This operation is idempotent.
     pub fn shrink_to_fit(&mut self) -> Uninit<'a, ()> {
         self.uninit.shrink_to_fit()
     }
@@ -178,10 +190,7 @@ mod tests {
         const CAPACITY: usize = 30;
 
         let mut allocation: MaybeUninit<[Foo; CAPACITY]> = MaybeUninit::uninit();
-        let storage = Uninit::from_maybe_uninit(&mut allocation)
-            .cast_slice::<Foo>()
-            .ok().expect("Everything fine for storings Foo's");
-        let mut vec = FixedVec::new(storage);
+        let mut vec = FixedVec::from_available(Uninit::from_maybe_uninit(&mut allocation));
 
         assert_eq!(vec.capacity(), CAPACITY);
         assert_eq!(vec.len(), 0);
@@ -214,10 +223,7 @@ mod tests {
 
 
         let mut allocation: MaybeUninit<[HasDrop; COUNT]> = MaybeUninit::uninit();
-        let storage = Uninit::from_maybe_uninit(&mut allocation)
-            .cast_slice::<HasDrop>()
-            .ok().expect("Everything fine for storings Foo's");
-        let mut vec = FixedVec::new(storage);
+        let mut vec = FixedVec::from_available(Uninit::from_maybe_uninit(&mut allocation));
 
         for i in 0..COUNT {
             assert!(vec.push(HasDrop(i)).is_ok());
@@ -231,9 +237,39 @@ mod tests {
     fn zst() {
         struct Zst;
 
-        let storage = Uninit::<()>::invent_for_zst();
-        let mut vec = FixedVec::<Zst>::new(storage.cast_slice().unwrap());
+        let mut vec = FixedVec::<Zst>::new(Uninit::empty());
 
         assert_eq!(vec.capacity(), usize::max_value());
+    }
+
+    #[test]
+    fn split_and_shrink() {
+        // Zeroed because we want to test the contents.
+        let mut allocation: MaybeUninit<[u16; 8]> = MaybeUninit::zeroed();
+        let mut aligned = Uninit::from_maybe_uninit(&mut allocation).as_memory();
+        let _ = aligned.split_at_byte(15);
+
+        let mut vec = FixedVec::from_available(aligned);
+        let mut second = vec.split_and_shrink_to(4);
+        let tail = second.shrink_to_fit();
+
+        assert_eq!(vec.capacity(), 4);
+        assert_eq!(vec.shrink_to_fit().size(), 0);
+        assert_eq!(second.capacity(), 3);
+        assert_eq!(second.shrink_to_fit().size(), 0);
+        assert_eq!(tail.size(), 1);
+
+        let _ = tail.cast::<u8>().unwrap().init(0xFF);
+        (0_u16..4).for_each(|v| assert!(vec.push(v).is_ok()));
+        (4..7).for_each(|v| assert!(second.push(v).is_ok()));
+
+        assert_eq!(vec.len(), 4);
+        assert_eq!(second.len(), 3);
+
+        drop(vec);
+        drop(second);
+        assert_eq!(
+            &unsafe { *allocation.as_ptr() }[..7],
+            [0, 1, 2, 3, 4, 5, 6]);
     }
 }

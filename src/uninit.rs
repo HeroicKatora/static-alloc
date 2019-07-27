@@ -287,10 +287,19 @@ impl<'a, T> Uninit<'a, T> {
 }
 
 impl<'a, T> Uninit<'a, [T]> {
+    /// Creates a pointer to an empty slice.
+    pub fn empty() -> Self {
+        Uninit {
+            ptr: <&'a mut [T]>::default().into(),
+            len: 0,
+            lifetime: PhantomData,
+        }
+    }
+
     /// Get the pointer to the first element of the slice.
     ///
     /// If the slice would be empty then the pointer may be the past-the-end pointer as well.
-    pub fn as_begin_ptr(&self) -> *mut T {
+    pub const fn as_begin_ptr(&self) -> *mut T {
         self.ptr.as_ptr() as *mut T
     }
 
@@ -360,6 +369,11 @@ impl<'a, T> Uninit<'a, [T]> {
 }
 
 impl<'a, T: ?Sized> Uninit<'a, T> {
+    /// View the same uninit as untyped memory.
+    pub fn as_memory(self) -> Uninit<'a, ()> {
+        Uninit::decast(self)
+    }
+
     /// Borrow a view of the `Uninit` region.
     ///
     /// This is the equivalent of `&*mut_ref as *const _` but never runs afoul of accidentally
@@ -385,17 +399,17 @@ impl<'a, T: ?Sized> Uninit<'a, T> {
     }
 
     /// Get the byte size of the total allocation.
-    pub fn size(&self) -> usize {
+    pub const fn size(&self) -> usize {
         self.len
     }
 
     /// Acquires the underlying *mut pointer.
-    pub fn as_ptr(&self) -> *mut T {
+    pub const fn as_ptr(&self) -> *mut T {
         self.ptr.as_ptr()
     }
 
     /// Acquires the underlying pointer as a `NonNull`.
-    pub fn as_non_null(&self) -> ptr::NonNull<T> {
+    pub const fn as_non_null(&self) -> ptr::NonNull<T> {
         self.ptr
     }
 
@@ -505,6 +519,11 @@ impl<'a, T> UninitView<'a, T> {
 }
 
 impl<'a, T> UninitView<'a, [T]> {
+    /// Creates a pointer to an empty slice.
+    pub fn empty() -> Self {
+        UninitView(Uninit::empty())
+    }
+
     /// Get the pointer to the first element of the slice.
     pub fn as_begin_ptr(&self) -> *const T {
         self.0.as_begin_ptr() as *const T
@@ -538,12 +557,12 @@ impl<'a, T: ?Sized> UninitView<'a, T> {
     }
 
     /// Get the byte size of the total allocation.
-    pub fn size(&self) -> usize {
+    pub const fn size(&self) -> usize {
         self.0.size()
     }
 
     /// Acquires the underlying `*const T` pointer.
-    pub fn as_ptr(&self) -> *const T {
+    pub const fn as_ptr(&self) -> *const T {
         self.0.as_ptr() as *const T
     }
 
@@ -587,5 +606,17 @@ impl<T: ?Sized> fmt::Debug for UninitView<'_, T> {
            .field(&self.0.ptr)
            .field(&self.0.len)
            .finish()
+   }
+}
+
+impl<T> Default for Uninit<'_, [T]> {
+   fn default() -> Self {
+       Uninit::empty()
+   }
+}
+
+impl<T> Default for UninitView<'_, [T]> {
+   fn default() -> Self {
+       UninitView::empty()
    }
 }
