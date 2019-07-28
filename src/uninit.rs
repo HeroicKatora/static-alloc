@@ -66,7 +66,7 @@ pub struct Uninit<'a, T: ?Sized> {
     view: UninitView<'a, T>,
 
     /// Reminder for every construction.
-    mutable: PhantomData<&'a mut T>,
+    mutable: PhantomData<&'a mut ()>,
 }
 
 /// A non-mutable view on a region used in an [`Uninit`].
@@ -93,7 +93,11 @@ pub struct UninitView<'a, T: ?Sized> {
     /// Virtual lifetime to make this behave more similar to references.
     ///
     /// This borrows structures that hand out `Uninit` allocations.
-    lifetime: PhantomData<&'a T>,
+    lifetime: PhantomData<&'a ()>,
+
+    /// We'll be holding an actual `NonNull<T>` in the future (when dynamically sized pointers to
+    /// slices are more ergonomic). For now, just type ourselves.
+    typed: PhantomData<*mut T>,
 }
 
 impl Uninit<'_, ()> {
@@ -114,6 +118,7 @@ impl Uninit<'_, ()> {
             ptr,
             len,
             lifetime: PhantomData,
+            typed: PhantomData,
         })
     }
 
@@ -132,6 +137,7 @@ impl<'a> Uninit<'a, ()> {
             ptr: uninit.view.ptr.cast(),
             len: uninit.view.len,
             lifetime: PhantomData,
+            typed: PhantomData,
         })
     }
 
@@ -291,9 +297,10 @@ impl<'a, T> Uninit<'a, [T]> {
     /// Creates a pointer to an empty slice.
     pub fn empty() -> Self {
         Uninit::from_presumed_mutable_view(UninitView {
-            ptr: ptr::NonNull::from(<&'a mut [T]>::default()).cast(),
+            ptr: ptr::NonNull::<T>::dangling().cast(),
             len: 0,
             lifetime: PhantomData,
+            typed: PhantomData,
         })
     }
 
@@ -404,6 +411,7 @@ impl UninitView<'_, ()> {
             ptr,
             len,
             lifetime: PhantomData,
+            typed: PhantomData,
         }
     }
 
@@ -435,6 +443,7 @@ impl<'a> UninitView<'a, ()> {
             ptr: view.ptr.cast(),
             len: view.len,
             lifetime: PhantomData,
+            typed: PhantomData,
         }
     }
 
@@ -522,6 +531,7 @@ impl<'a, T> UninitView<'a, T> {
             ptr: self.ptr.cast(),
             len: self.len,
             lifetime: PhantomData,
+            typed: PhantomData,
         })
     }
 
@@ -537,6 +547,7 @@ impl<'a, T> UninitView<'a, T> {
             ptr: self.ptr,
             len: self.len,
             lifetime: PhantomData,
+            typed: PhantomData,
         })
     }
 
@@ -582,9 +593,10 @@ impl<'a, T> UninitView<'a, [T]> {
     /// use it as an `Uninit`.
     pub fn empty() -> Self {
         UninitView {
-            ptr: ptr::NonNull::from(<&'a [T]>::default()).cast(),
+            ptr: ptr::NonNull::<T>::dangling().cast(),
             len: 0,
             lifetime: PhantomData,
+            typed: PhantomData,
         }
     }
 
@@ -714,3 +726,26 @@ impl<T: ?Sized> Clone for UninitView<'_, T> {
 }
 
 impl<T: ?Sized> Copy for UninitView<'_, T> { }
+
+#[cfg(test)]
+mod tests {
+    use super::Uninit;
+
+    #[test]
+    fn lifetime_longer() {
+        fn _long<'a, T>(_: Uninit<'a, &'static T>) { }
+    }
+
+    #[test]
+    fn lifetime_shorter() {
+        fn _short<'a, T>(_: Uninit<'static, &'a T>) { }
+    }
+
+    #[test]
+    fn in_a_struct() {
+        enum _List<T> {
+            Nil,
+            Cons(T, Uninit<'static, T>),
+        }
+    }
+}
