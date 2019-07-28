@@ -17,16 +17,22 @@ use crate::uninit::Uninit;
 /// use static_alloc::{Box, Slab};
 ///
 /// #[derive(Debug)]
-/// enum List {
+/// enum List<T> {
 ///     Nil,
-///     Cons(usize, Box<'static, List>),
+///     Cons(T, Box<'static, List<T>>),
 /// }
 ///
 /// static SLAB: Slab<[u8; 1024]> = Slab::uninit();
 ///
 /// let base = SLAB.boxed(List::Nil).unwrap();
 /// let one = SLAB.boxed(List::Cons(0, base)).unwrap();
-/// let two = SLAB.boxed(List::Cons(0, one)).unwrap();
+/// let two = SLAB.boxed(List::Cons(1, one)).unwrap();
+///
+/// // We can destruct the value (not with `*` but comparable).
+/// match Box::take(two).0 {
+///     List::Cons(val, _)  => assert_eq!(val, 1), // Got the value back.
+///     _ => unreachable!(),
+/// }
 /// ```
 ///
 /// ## Downsides
@@ -221,5 +227,24 @@ impl<T> AsRef<T> for Box<'_, T> {
 impl<T> AsMut<T> for Box<'_, T> {
     fn as_mut(&mut self) -> &mut T {
         &mut **self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Box;
+    use crate::Slab;
+
+   #[test]
+    fn leak_with_smaller_lifetime() {
+        static SLAB: Slab<[usize; 1]> = Slab::uninit();
+        let local = 0;
+
+        // Box is `'static` but variable is not.
+        let boxed: Box<'static, _> = SLAB.boxed(&local).unwrap();
+        // Check that we can leak with appropriate lifetime.
+        let _: & mut _ = Box::leak(boxed);
+
+        drop(local);
     }
 }
