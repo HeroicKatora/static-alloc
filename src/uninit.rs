@@ -381,6 +381,13 @@ impl<'a, T> Uninit<'a, [T]> {
 }
 
 impl<'a, T: ?Sized> Uninit<'a, T> {
+    /// Check if the view fits some layout.
+    ///
+    /// The `cast` to a type of the provided layout will work without error.
+    pub fn fits(&self, layout: Layout) -> bool {
+        self.view.fits(layout)
+    }
+
     /// View the same uninit as untyped memory.
     pub fn as_memory(self) -> Uninit<'a, ()> {
         Uninit::decast(self)
@@ -486,11 +493,6 @@ impl<'a> UninitView<'a, ()> {
 }
 
 impl<T> UninitView<'_, T> {
-    fn fits(&self, layout: Layout) -> bool {
-        self.ptr.as_ptr().align_offset(layout.align()) == 0
-            && layout.size() <= self.len
-    }
-
     /// Invent a new uninit allocation for a zero-sized type (ZST).
     ///
     /// # Panics
@@ -688,6 +690,14 @@ impl<'a, T> UninitView<'a, [T]> {
 }
 
 impl<'a, T: ?Sized> UninitView<'a, T> {
+    /// Check if the view fits some layout.
+    ///
+    /// The `cast` to a type of the provided layout will work without error.
+    pub fn fits(&self, layout: Layout) -> bool {
+        self.ptr.as_ptr().align_offset(layout.align()) == 0
+            && layout.size() <= self.len
+    }
+
     /// Borrow another view of the `Uninit` region.
     pub fn borrow(&self) -> UninitView<'_, T> {
         *self
