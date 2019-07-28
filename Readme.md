@@ -1,6 +1,6 @@
 # static-alloc
 
-General purpose global allocator(s) with static storage.
+Replacements for `alloc` without dynamic allocation.
 
 ## Goal and Target Platform
 
@@ -38,12 +38,28 @@ fn main() {
     // Vec occupying `1 << 7` bytes
     let v = vec![0xdeadbeef_u32; 32];
 
-    // Can also allocate values directly.
-    // Even without `alloc::boxed::Box`.
-    let buffer: &'static mut [u32; 32] = A.leak([0; 32])
+    // … or allocate values directly.
+    let buffer: &mut [u32; 32] = A.leak([0; 32])
         .unwrap();
     buffer.copy_from_slice(&v);
 }
+```
+
+For recursive data structures:
+
+```rust
+use static_alloc::{Box, Slab};
+
+enum List {
+    Nil,
+    Cons(u8, Box<'static, List>),
+}
+
+static SLAB: Slab<[u8; 1024]> = Slab::uninit();
+
+let base = SLAB.boxed(List::Nil).unwrap();
+let one = SLAB.boxed(List::Cons(0, base)).unwrap();
+let two = SLAB.boxed(List::Cons(1, one)).unwrap();
 ```
 
 As local memory pools for fixed capacity `FixedVec`:
