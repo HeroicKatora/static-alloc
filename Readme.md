@@ -1,6 +1,6 @@
 # static-alloc
 
-General purpose global allocator(s) with static storage.
+Replacements for `alloc` without dynamic allocation.
 
 ## Goal and Target Platform
 
