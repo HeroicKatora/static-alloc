@@ -8,6 +8,8 @@ use core::{fmt, mem, ptr};
 use core::alloc::Layout;
 use core::marker::PhantomData;
 
+use crate::boxed::Box;
+
 /// Points to an uninitialized place but would otherwise be a valid reference.
 ///
 /// This is a `&mut`-like struct that is somewhat of a pendant to `MaybeUninit`. It makes it
@@ -290,6 +292,26 @@ impl<'a, T> Uninit<'a, T> {
     /// Turn this into a mutable reference to the content.
     pub unsafe fn into_mut(self) -> &'a mut T {
         &mut *self.as_ptr()
+    }
+
+    /// Utilize this `Uninit` allocation for a boxed value.
+    ///
+    /// Stores the value at the pointed-to location and utilizes the `Box` as a RAII-guard to
+    /// properly drop the value when the box itself is dropped.
+    pub fn into_box(self, val: T) -> Box<'a, T> {
+        Box::new(val, self)
+    }
+
+    /// Read a value from the uninit place without moving it.
+    ///
+    /// The `Uninit` ensures that the inner pointer is correctly aligned, non-null, and points to a
+    /// large enough region for reading a `T`.
+    ///
+    /// ## Safety
+    /// Caller must ensure that the memory is initialized as a valid `T`. It must also avoid double
+    /// `Drop`. Basically, a new instance is created.
+    pub unsafe fn read(&self) -> T {
+        ptr::read(self.as_ptr())
     }
 }
 

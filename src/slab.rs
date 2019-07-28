@@ -10,7 +10,7 @@ use core::mem::{self, MaybeUninit};
 use core::ptr::{NonNull, null_mut};
 use core::sync::atomic::{AtomicUsize, Ordering};
 
-use super::Uninit;
+use super::{Box, Uninit};
 
 /// Allocator drawing from an inner, statically sized memory resource.
 ///
@@ -420,6 +420,11 @@ impl<T> Slab<T> {
             uninit: uninit.cast().ok().unwrap(),
             level,
         })
+    }
+
+    pub fn boxed<V>(&self, val: V) -> Option<Box<'_, V>> {
+        let alloc = self.get::<V>()?;
+        Some(Box::new(val, alloc.uninit))
     }
 
     /// Observe the current level.
