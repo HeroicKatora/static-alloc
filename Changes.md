@@ -1,3 +1,11 @@
+## v0.0.6
+
+- Introduces `Box`, an owned value within an `Uninit` allocation
+- Fixed `Uninit` to never rely on references internally. Unfortunately, this
+  means that unsized `Uninit` currently do no track the size of their pointer.
+  That will return sooner or later when the resolution of Rust #36925 provides
+  `ptr::slice_from_raw_parts`.
+
 ## v0.0.5
 
 - Introduces `Uninit`, a lifetime tracked pointed to uninitialized memory.
