@@ -8,6 +8,32 @@ use crate::uninit::Uninit;
 
 /// An allocated instance of a type.
 ///
+/// ## Example
+///
+/// The basic usage are allocated recursive data structures. Here is a standard example using a
+/// `Slab` with `'static` storage duration as the allocator:
+///
+/// ```
+/// use static_alloc::{Box, Slab};
+///
+/// #[derive(Debug)]
+/// enum List {
+///     Nil,
+///     Cons(usize, Box<'static, List>),
+/// }
+///
+/// static SLAB: Slab<[u8; 1024]> = Slab::uninit();
+///
+/// let base = SLAB.boxed(List::Nil).unwrap();
+/// let one = SLAB.boxed(List::Cons(0, base)).unwrap();
+/// let two = SLAB.boxed(List::Cons(0, one)).unwrap();
+/// ```
+///
+/// ## Downsides
+///
+/// Unfortunately, this `Box` does not yet support unsizing. This is very unfortunate as it means
+/// you can't use it for type erasure.
+///
 /// ## Design
 /// You will likely notice quickly that this has different semantics than the `std::boxed::Box`.
 /// Its inner pointer may be larger and it does not allocate nor deallocate memory on its own. This
