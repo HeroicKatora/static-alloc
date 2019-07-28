@@ -739,6 +739,12 @@ impl<T: ?Sized> fmt::Debug for UninitView<'_, T> {
    }
 }
 
+impl<'a, T> From<Uninit<'a, T>> for UninitView<'a, T> {
+    fn from(uninit: Uninit<'a, T>) -> Self {
+        uninit.view
+    }
+}
+
 impl<T> Default for Uninit<'_, [T]> {
    fn default() -> Self {
        Uninit::empty()
