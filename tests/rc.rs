@@ -7,6 +7,7 @@ fn create() {
 
     let rc = memory.rc(0usize).unwrap();
     assert_eq!(rc::Rc::strong_count(&rc), 1);
+    assert_eq!(rc::Rc::weak_count(&rc), 1);
 }
 
 #[test]

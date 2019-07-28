@@ -8,6 +8,11 @@ use core::cell::Cell;
 use crate::uninit::{Uninit, UninitView};
 
 pub struct Rc<'a, T> {
+    /// Shared view on the memory of the box.
+    ///
+    /// It is important **NOT** to safely expose this to the user. The weak counter maintains the
+    /// invariant that the pointed-to memory is no longer aliased when the last Rc to that view has
+    /// been dropped.
     inner: UninitView<'a, RcBox<T>>,
 }
 
@@ -23,6 +28,7 @@ pub struct Rc<'a, T> {
 /// incrementally better.
 #[repr(C)]
 struct RcBox<T> {
+    /// Keep this member first!
     val: T,
 
     /// The number of owners of the value.
@@ -56,9 +62,45 @@ impl<'a, T> Rc<'a, T> {
         unimplemented!()
     }
 
-    pub fn into_raw(rc: Self) -> Uninit<'a, T> {
-        // TODO: offset to the val field.
-        unimplemented!()
+    /// Try to extract the memory.
+    ///
+    /// This returns `Some` only when this is the last strong *and* weak reference to the value.
+    /// The contained value will be preserved and is not dropped. Use `from_raw` to reinitialize a
+    /// new `Rc` with the old value and memory.
+    ///
+    /// ## Example
+    ///
+    /// ```
+    /// use static_alloc::{Slab, rc::Rc};
+    ///
+    /// struct HotPotato;
+    ///
+    /// impl Drop for HotPotato {
+    ///     fn drop(&mut self) {
+    ///         panic!("dropped!");
+    ///     }
+    /// }
+    ///
+    /// let slab: Slab<[u8; 1024]> = Slab::uninit();
+    /// let foo = slab.rc(HotPotato).unwrap();
+    ///
+    /// let raw = Rc::into_raw(foo).unwrap();
+    /// // No panic. Value has not been dropped.
+    /// ```
+    pub fn into_raw(rc: Self) -> Option<Uninit<'a, T>> {
+        if Rc::weak_count(&rc) != 1 && Rc::strong_count(&rc) != 1 {
+            // Note: implicitely decrements `strong`
+            return None;
+        }
+
+        let ptr = rc.inner.as_non_null();
+        let len = rc.inner.size();
+        mem::forget(rc);
+        unsafe {
+            // SAFETY: restored the memory we just forgot. We are the only reference to it, so it
+            // is fine to restore the original unqiue allocation reference.
+            Some(Uninit::from_memory(ptr.cast(), len).cast().unwrap())
+        }
     }
 
     pub fn try_unwrap(b: Self) -> Result<(T, Uninit<'a, T>), Self> {
@@ -72,7 +114,7 @@ impl<T> Rc<'_, T> {
     }
 
     pub fn weak_count(rc: &Self) -> usize {
-        unimplemented!()
+        rc.inner().weak.get()
     }
 
     pub fn strong_count(rc: &Self) -> usize {
@@ -98,6 +140,7 @@ impl<T> Rc<'_, T> {
     }
 
     fn as_mut_ptr(&mut self) -> *mut T {
+        // `T` is the first member, #[repr(C)] makes this cast well behaved.
         self.inner.as_ptr() as *mut T
     }
 
@@ -109,6 +152,16 @@ impl<T> Rc<'_, T> {
     fn dec_strong(&self) {
         let val = Self::strong_count(self) - 1;
         self.inner().strong.set(val);
+    }
+
+    fn inc_weak(&self) {
+        let val = Self::weak_count(self) + 1;
+        self.inner().weak.set(val);
+    }
+
+    fn dec_weak(&self) {
+        let val = Self::weak_count(self) - 1;
+        self.inner().weak.set(val);
     }
 }
 
@@ -144,6 +197,8 @@ impl<T> Drop for Rc<'_, T> {
         self.dec_strong();
         // weak count doesn't actually do anything.
         if Rc::strong_count(self) == 0 {
+            self.dec_weak();
+
             unsafe {
                 ptr::drop_in_place(self.as_mut_ptr())
             }
@@ -156,6 +211,56 @@ impl<T> Clone for Rc<'_, T> {
         self.inc_strong();
         Rc {
             inner: self.inner,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use core::cell::Cell;
+
+    use super::{RcBox, Rc};
+    use crate::Slab;
+
+    #[test]
+    fn layout_box_compatible() {
+        let mut boxed = RcBox {
+            val: 0usize,
+            strong: Cell::new(1),
+            weak: Cell::new(1),
+        };
+
+        let val_ptr = &boxed as *const _ as *const usize;
+        assert_eq!(unsafe { *val_ptr }, 0);
+
+        boxed.val = 0xdeadbeef;
+        assert_eq!(unsafe { *val_ptr }, 0xdeadbeef);
+    }
+
+    #[test]
+    fn control_through_counters() {
+        struct Duck;
+        struct NeverDrop;
+
+        impl Drop for NeverDrop {
+            fn drop(&mut self) {
+                panic!("dropped!");
+            }
+        }
+
+        let slab: Slab<[u8; 1024]> = Slab::uninit();
+        let rc = slab.rc(NeverDrop).unwrap();
+        rc.inc_strong();
+        drop(rc);
+
+        let rc = slab.rc(Duck).unwrap();
+        // Forbidden in public, but we do not grab mutable references.
+        let inner = rc.inner;
+        drop(rc);
+
+        unsafe {
+            assert_eq!((*inner.as_ptr()).strong.get(), 0);
+            assert_eq!((*inner.as_ptr()).weak.get(), 0);
         }
     }
 }
