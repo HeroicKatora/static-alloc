@@ -52,6 +52,7 @@
 #![deny(missing_docs)]
 
 pub mod boxed;
+pub mod rc;
 pub mod slab;
 pub mod uninit;
 pub mod fixed_vec;
