@@ -3,7 +3,7 @@
 //! See [`Rc`] for more information.
 //!
 //! [`Rc`]: ./struct.Rc.html
-use core::{cmp, fmt, mem, ops, ptr};
+use core::{borrow, cmp, fmt, hash, mem, ops, ptr};
 use core::alloc::Layout;
 use core::cell::Cell;
 
@@ -636,13 +636,11 @@ impl<T: Ord> Ord for Rc<'_, T> {
     }
 }
 
-/*
 impl<T: hash::Hash> hash::Hash for Rc<'_, T> {
     fn hash<H: hash::Hasher>(&self, state: &mut H) {
         (**self).hash(state)
     }
 }
-*/
 
 impl<T: fmt::Display> fmt::Display for Rc<'_, T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -659,6 +657,18 @@ impl<T: fmt::Debug> fmt::Debug for Rc<'_, T> {
 impl<T> fmt::Pointer for Rc<'_, T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         fmt::Pointer::fmt(&self.as_ptr(), f)
+    }
+}
+
+impl<T> borrow::Borrow<T> for Rc<'_, T> {
+    fn borrow(&self) -> &T {
+        &**self
+    }
+}
+
+impl<T> AsRef<T> for Rc<'_, T> {
+    fn as_ref(&self) -> &T {
+        &**self
     }
 }
 

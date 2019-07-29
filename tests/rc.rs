@@ -10,6 +10,7 @@ fn create() {
     assert_eq!(rc::Rc::weak_count(&rc), 1);
 
     assert_eq!(rc.wrapping_add(1), 1);
+    assert_eq!(*rc.as_ref(), 0);
 }
 
 #[test]
@@ -114,4 +115,19 @@ fn compares() {
     assert!(zero <= one);
     assert!(one > zero);
     assert!(one >= zero);
+}
+
+#[test]
+fn hashing() {
+    use std::collections::HashMap;
+    const KEY: usize = 0xdeadbeef;
+    const VAL: &str = "mapped";
+    let memory: Slab<[u8; 1024]> = Slab::uninit();
+
+    let value = memory.rc(KEY).unwrap();
+    let map = Some((value, VAL))
+        .into_iter()
+        .collect::<HashMap<_, _>>();
+
+    assert_eq!(map.get(&KEY).cloned(), Some(VAL));
 }
