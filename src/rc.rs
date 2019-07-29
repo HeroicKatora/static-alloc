@@ -29,6 +29,8 @@ pub struct Rc<'a, T> {
 #[repr(C)]
 struct RcBox<T> {
     /// Keep this member first!
+    ///
+    /// Note that `as_mut_ptr` and `into_raw` rely on this.
     val: T,
 
     /// The number of owners of the value.
@@ -42,6 +44,28 @@ struct RcBox<T> {
 }
 
 impl<'a, T> Rc<'a, T> {
+    /// Constructs a new `Rc<T>`.
+    ///
+    /// See also [`Slab::rc`], which encapsulates the process of allocation and construction in a
+    /// single method call.
+    ///
+    /// ## Panics
+    /// This function panics if the memory is not valid for the layout of [`Rc::layout`].
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use static_alloc::{Slab, rc::Rc};
+    ///
+    /// struct Foo(u32);
+    ///
+    /// let slab: Slab<[u8; 1024]> = Slab::uninit();
+    /// let memory = slab.get_layout(Rc::<Foo>::layout()).unwrap();
+    /// let rc = Rc::new(Foo(0), memory.uninit);
+    /// ```
+    ///
+    /// [`Rc::layout`]: #method.layout
+    /// [`Slab::rc`]: ../slab/struct.Slab.html#method.rc
     pub fn new(val: T, memory: Uninit<'a, ()>) -> Self {
         assert!(memory.fits(Self::layout()), "Provided memory must fit the inner layout");
         let mut memory = memory.cast::<RcBox<T>>().unwrap();
@@ -109,31 +133,29 @@ impl<'a, T> Rc<'a, T> {
 }
 
 impl<T> Rc<'_, T> {
-    /// Get the layout that needs to be allocated to create the inner structure of an `Rc`.
+    /// Get the layout for memory passed to [`Rc::new`].
     ///
-    /// You should not rely on the value returned here. The only guarantee is that the size of the
-    /// layout is at least as large as the input type.
+    /// You should not rely on the value returned here. The two guarantees are: the size of the
+    /// layout is at least as large as the input type and it is never empty.
     ///
     /// An `Rc` does not simply point to a lone instance of a type but instead adds some small
     /// metadata (two pointer-sized counters). To keep the implementation details private, this
     /// method allows allocation of properly sized regions without exposing the exact type that
     /// will be stored on the heap.
     ///
+    /// ## Examples
+    ///
     /// ```
-    /// use static_alloc::{Slab, rc::Rc};
+    /// use static_alloc::rc::Rc;
     ///
     /// struct Foo(u32);
+    /// struct Empty;
     ///
-    /// let slab: Slab<[u8; 1024]> = Slab::uninit();
-    /// let layout = Rc::<Foo>::layout();
-    /// assert!(layout.size() >= 4);
-    ///
-    /// let memory = slab.get_layout(layout).unwrap();
-    ///
-    /// // later:
-    ///
-    /// let rc = Rc::new(Foo(0), memory.uninit);
+    /// assert!(Rc::<Foo>::layout().size() >= 4);
+    /// assert!(Rc::<Empty>::layout().size() > 0);
     /// ```
+    ///
+    /// [`Rc::new`]: #method.new
     pub fn layout() -> Layout {
         // FIXME: this should really be `const` but `Layout` does not offer that yet.
         Layout::new::<RcBox<T>>()
@@ -188,6 +210,13 @@ impl<T> Rc<'_, T> {
         }
     }
 
+    fn is_unique(&self) -> bool {
+        Rc::strong_count(self) == 1 && Rc::weak_count(self) == 1
+    }
+
+    /// Get the pointer to the value without creating intermediate references.
+    ///
+    /// This currently relies on the layout of the inner struct.
     fn as_mut_ptr(&mut self) -> *mut T {
         // `T` is the first member, #[repr(C)] makes this cast well behaved.
         self.inner.as_ptr() as *mut T
@@ -303,9 +332,10 @@ mod tests {
         rc.inc_strong();
         drop(rc);
 
-        let rc = slab.rc(Duck).unwrap();
+        let mut rc = slab.rc(Duck).unwrap();
         // Forbidden in public, but we do not grab mutable references.
         let inner = rc.inner;
+        assert_eq!(rc.as_mut_ptr() as *const u8, inner.as_ptr() as *const u8);
         drop(rc);
 
         unsafe {
