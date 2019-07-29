@@ -30,7 +30,9 @@ fn reference_juggling() {
 
 
     let memory: Slab<[u8; 1024]> = Slab::uninit();
-    let mut foo = memory.rc(HotPotato(0)).unwrap();
+    let alloc = memory.get_layout(rc::Rc::<HotPotato>::layout()).unwrap();
+    let ptr = alloc.uninit.as_non_null();
+    let mut foo = rc::Rc::new(HotPotato(0), alloc.uninit);
 
     rc::Rc::get_mut(&mut foo).unwrap().0 = 4;
     // Create a second Rc
@@ -44,5 +46,9 @@ fn reference_juggling() {
     let (val, weak) = rc::Rc::try_unwrap(foo).ok().unwrap();
     assert_eq!(rc::Weak::strong_count(&weak), 0);
     assert_eq!(rc::Weak::weak_count(&weak), 1);
+
+    let mem = rc::Weak::try_unwrap(weak).ok().unwrap();
+    assert_eq!(ptr, mem.as_non_null());
+
     mem::forget(val);
 }

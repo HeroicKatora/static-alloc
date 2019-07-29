@@ -273,7 +273,59 @@ impl<T> Rc<'_, T> {
     }
 }
 
+impl<'a, T> Weak<'a, T> {
+    /// Try to unwrap the original allocation of the `Rc`.
+    ///
+    /// This will only work when this is the only pointer to the allocation. That is, there are
+    /// neither `Weak` nor `Rc` still pointing at it.
+    ///
+    /// ## Example
+    ///
+    /// ```
+    /// use static_alloc::{rc, Slab};
+    ///
+    /// struct Foo;
+    ///
+    /// let slab: Slab<[u8; 1024]> = Slab::uninit();
+    /// let rc = slab.rc(Foo).unwrap();
+    /// let (_, weak) = rc::Rc::try_unwrap(rc).ok().unwrap();
+    ///
+    /// // This is the only one pointing at the allocation.
+    /// let memory = weak.try_unwrap().ok().unwrap();
+    /// ```
+    pub fn try_unwrap(self) -> Result<Uninit<'a, ()>, Self> {
+        if !self.is_unique_to_rc_memory() {
+            return Err(self);
+        }
+
+        let ptr = self.inner.as_non_null();
+        let len = self.inner.size();
+        unsafe {
+            // SAFETY: restored the memory that an rc has originally provided to the `Weak`. We are
+            // the only reference to it, so it is fine to restore the original unqiue allocation
+            // reference.
+            Ok(Uninit::from_memory(ptr.cast(), len))
+        }
+    }
+}
+
 impl<T> Weak<'_, T> {
+    /// Gets the number of strong pointers pointing at the value.
+    ///
+    /// ## Example
+    ///
+    /// ```
+    /// use static_alloc::{rc, Slab};
+    ///
+    /// struct Foo;
+    ///
+    /// let slab: Slab<[u8; 1024]> = Slab::uninit();
+    /// let rc = slab.rc(Foo).unwrap();
+    /// let (_, weak) = rc::Rc::try_unwrap(rc).ok().unwrap();
+    ///
+    /// // We just destroyed the only one.
+    /// assert_eq!(rc::Weak::strong_count(&weak), 0);
+    /// ```
     pub fn strong_count(&self) -> usize {
         self.strong().get()
     }
@@ -291,10 +343,15 @@ impl<T> Weak<'_, T> {
     /// let rc = slab.rc(Foo).unwrap();
     /// let (_, weak) = rc::Rc::try_unwrap(rc).ok().unwrap();
     ///
+    /// // This is the only one pointing at the allocation.
     /// assert_eq!(rc::Weak::weak_count(&weak), 1);
     /// ```
     pub fn weak_count(&self) -> usize {
         self.weak().get()
+    }
+
+    fn is_unique_to_rc_memory(&self) -> bool {
+        self.strong_count() == 0 && self.weak_count() == 1
     }
 
     /// Get a reference to the weak counter.
