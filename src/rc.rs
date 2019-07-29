@@ -1,12 +1,25 @@
 //! Reference counter value.
 //!
+//! See [`Rc`] for more information.
 //!
+//! [`Rc`]: ./struct.Rc.html
 use core::{mem, ptr};
 use core::alloc::Layout;
 use core::cell::Cell;
 
 use crate::uninit::{Uninit, UninitView};
 
+/// A single-threaded reference-counting pointer. 'Rc' stands for 'Reference Counted'.
+///
+/// The inherent methods are all associated functions. This means you can not call them
+/// unexpectedly through deref-coercion the reference itself. Instead, you need to call them as
+/// `Rc::try_unwrap(rc)` etc. .
+///
+/// Compared to the standard library version, this will perform its own allocation. Instead, you
+/// can ask [`Slab`] to perform them or manually allocate guided by the necessary [`layout`].
+///
+/// [`Slab`]: ../slab/struct.Slab.html#method.rc
+/// [`layout`]: #method.layout
 pub struct Rc<'a, T> {
     /// Shared view on the memory of the box.
     ///
@@ -16,6 +29,14 @@ pub struct Rc<'a, T> {
     inner: UninitView<'a, RcBox<T>>,
 }
 
+/// A reference-counting pointer to the allocation of an `Rc`.
+///
+/// ## TODO
+///
+/// Evaluate an interface:
+/// ```ignore
+/// fn reinit(&self, val: T) -> Result<Rc<T>, T>;
+/// ```
 pub struct Weak<'a, T> {
     /// Shared view on the memory of the box.
     ///
@@ -219,14 +240,22 @@ impl<T> Rc<'_, T> {
         Layout::new::<RcBox<T>>()
     }
 
+    /// Gets the number of weak pointers to the value.
+    ///
+    /// Note that all `Rc` to the same value count as one weak pointer in total.
     pub fn weak_count(rc: &Self) -> usize {
         rc.inner().weak.get()
     }
 
+    /// Gets the number of strong pointers to the value.
     pub fn strong_count(rc: &Self) -> usize {
         rc.inner().strong.get()
     }
 
+    /// Try to retrieve a mutable reference to the value.
+    ///
+    /// This method will only succeed if there are no other pointers to the same value, neither
+    /// strong ones nor weak ones.
     pub fn get_mut(rc: &mut Self) -> Option<&mut T> {
         if rc.is_unique() {
             Some(unsafe { &mut *rc.as_mut_ptr() })
