@@ -3,7 +3,7 @@
 //! See [`Rc`] for more information.
 //!
 //! [`Rc`]: ./struct.Rc.html
-use core::{fmt, mem, ops, ptr};
+use core::{cmp, fmt, mem, ops, ptr};
 use core::alloc::Layout;
 use core::cell::Cell;
 
@@ -592,6 +592,57 @@ impl<T> Clone for Weak<'_, T> {
         }
     }
 }
+
+impl<'a, 'b, T: PartialEq> PartialEq<Rc<'b, T>> for Rc<'a, T> {
+    #[inline]
+    fn eq(&self, other: &Rc<T>) -> bool {
+        PartialEq::eq(&**self, &**other)
+    }
+    #[inline]
+    fn ne(&self, other: &Rc<T>) -> bool {
+        PartialEq::ne(&**self, &**other)
+    }
+}
+
+impl<T: Eq> Eq for Rc<'_, T> { }
+
+impl<'a, 'b, T: PartialOrd> PartialOrd<Rc<'b, T>> for Rc<'a, T> {
+    #[inline]
+    fn partial_cmp(&self, other: &Rc<T>) -> Option<cmp::Ordering> {
+        PartialOrd::partial_cmp(&**self, &**other)
+    }
+    #[inline]
+    fn lt(&self, other: &Rc<T>) -> bool {
+        PartialOrd::lt(&**self, &**other)
+    }
+    #[inline]
+    fn le(&self, other: &Rc<T>) -> bool {
+        PartialOrd::le(&**self, &**other)
+    }
+    #[inline]
+    fn ge(&self, other: &Rc<T>) -> bool {
+        PartialOrd::ge(&**self, &**other)
+    }
+    #[inline]
+    fn gt(&self, other: &Rc<T>) -> bool {
+        PartialOrd::gt(&**self, &**other)
+    }
+}
+
+impl<T: Ord> Ord for Rc<'_, T> {
+    #[inline]
+    fn cmp(&self, other: &Rc<T>) -> cmp::Ordering {
+        Ord::cmp(&**self, &**other)
+    }
+}
+
+/*
+impl<T: hash::Hash> hash::Hash for Rc<'_, T> {
+    fn hash<H: hash::Hasher>(&self, state: &mut H) {
+        (**self).hash(state)
+    }
+}
+*/
 
 impl<T: fmt::Display> fmt::Display for Rc<'_, T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {

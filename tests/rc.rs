@@ -97,3 +97,21 @@ fn downgrade_upgrade() {
 
     assert!(weak.upgrade().is_none());
 }
+
+#[test]
+fn compares() {
+    let memory: Slab<[u8; 1024]> = Slab::uninit();
+
+    let zero = memory.rc(0usize).unwrap();
+    let one = memory.rc(1usize).unwrap();
+
+    assert_eq!(zero, zero);
+    assert_eq!(one, one);
+    assert!(!(zero != zero));
+    assert_ne!(zero, one);
+
+    assert!(zero < one);
+    assert!(zero <= one);
+    assert!(one > zero);
+    assert!(one >= zero);
+}
