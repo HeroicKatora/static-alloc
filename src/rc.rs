@@ -375,6 +375,37 @@ impl<'a, T> Weak<'a, T> {
             Ok(Uninit::from_memory(ptr.cast(), len))
         }
     }
+
+    /// Attempt to upgrade to a shared pointer to the value.
+    ///
+    /// This operation will only succeed if there are still strong pointers to the value, i.e.
+    /// `strong_count` is not zero. Then the value has not been dropped yet and its lifetime is
+    /// extended.
+    ///
+    /// ```
+    /// use static_alloc::{rc, Slab};
+    ///
+    /// let memory: Slab<[u8; 1024]> = Slab::uninit();
+    /// let rc = memory.rc(0usize).unwrap();
+    ///
+    /// let weak = rc::Rc::downgrade(&rc);
+    /// let rc2 = weak.upgrade().unwrap();
+    ///
+    /// drop(rc);
+    /// drop(rc2);
+    ///
+    /// // No more strong pointers left.
+    /// assert!(weak.upgrade().is_none());
+    /// ```
+    pub fn upgrade(&self) -> Option<Rc<'a, T>> {
+        if self.strong_count() == 0 {
+            None
+        } else { 
+            let rc = Rc { inner: self.inner };
+            rc.inc_strong();
+            Some(rc)
+        }
+    }
 }
 
 impl<T> Weak<'_, T> {

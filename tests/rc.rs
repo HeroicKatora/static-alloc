@@ -72,3 +72,26 @@ fn raw_and_back() {
     let mut rc = unsafe { rc::Rc::from_raw(raw) };
     assert_eq!(rc::Rc::get_mut(&mut rc).unwrap() as *mut _, ptr_to_val.as_ptr());
 }
+
+#[test]
+fn downgrade_upgrade() {
+    let memory: Slab<[u8; 1024]> = Slab::uninit();
+
+    let rc = memory.rc(0usize).unwrap();
+    assert_eq!(rc::Rc::strong_count(&rc), 1);
+    assert_eq!(rc::Rc::weak_count(&rc), 1);
+
+    let weak = rc::Rc::downgrade(&rc);
+    let rc2 = weak.upgrade().unwrap();
+
+    assert_eq!(rc::Rc::strong_count(&rc), 2);
+    assert_eq!(rc::Rc::weak_count(&rc), 2);
+    drop(weak);
+
+    drop(rc);
+    let (_, weak) = rc::Rc::try_unwrap(rc2).ok().unwrap();
+    assert_eq!(weak.strong_count(), 0);
+    assert_eq!(weak.weak_count(), 1);
+
+    assert!(weak.upgrade().is_none());
+}
