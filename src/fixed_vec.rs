@@ -46,6 +46,57 @@ pub struct FixedVec<'a, T> {
 }
 
 impl<T> FixedVec<'_, T> {
+    /// Shorten the vector to a maximum length.
+    ///
+    /// If the length is not larger than `len` this has no effect.
+    ///
+    /// The tail of the vector is dropped starting from the last element. This is opposite to
+    /// ([WIP] interface does not yet exist) `.drain(len..).for_each(drop)`.
+    ///
+    /// ## Example
+    ///
+    /// ```
+    /// # use core::mem::MaybeUninit;
+    /// # use static_alloc::{FixedVec, Uninit};
+    ///
+    /// let mut memory: MaybeUninit<[usize; 4]> = MaybeUninit::uninit();
+    /// let uninit = Uninit::from(&mut memory).cast_slice().unwrap();
+    /// let mut vec = FixedVec::new(uninit);
+    ///
+    /// vec.push(0usize);
+    /// vec.push(1usize);
+    /// vec.push(2usize);
+    ///
+    /// assert_eq!(vec.as_slice(), [0, 1, 2]);
+    /// vec.truncate(1);
+    /// assert_eq!(vec.as_slice(), [0]);
+    /// ```
+    pub fn truncate(&mut self, len: usize) {
+        struct SetLenOnDrop<'a> {
+            len: &'a mut usize,
+            local_len: usize,
+        }
+
+        impl Drop for SetLenOnDrop<'_> {
+            fn drop(&mut self) {
+                *self.len = self.local_len;
+            }
+        }
+
+        let mut ptr = self.end_mut_ptr();
+        let current_length = self.length;
+        let mut set_len = SetLenOnDrop { len: &mut self.length, local_len: current_length };
+
+        for _ in len..current_length {
+            set_len.local_len -= 1;
+
+            unsafe {
+                ptr = ptr.offset(-1);
+                ptr::drop_in_place(ptr);
+            }
+        }
+    }
+
     /// Extracts a slice containing the entire vector.
     pub fn as_slice(&self) -> &[T] {
         unsafe {
@@ -155,6 +206,10 @@ impl<T> FixedVec<'_, T> {
         // This must always be possible. `self.length` is nevery greater than the capacity.
         let tail = all.split_at(self.length).unwrap();
         (all, tail)
+    }
+
+    fn end_mut_ptr(&mut self) -> *mut T {
+        unsafe { self.as_mut_ptr().add(self.length) }
     }
 }
 
@@ -272,7 +327,7 @@ mod tests {
     #[test]
     fn zst() {
         struct Zst;
-        let mut vec = FixedVec::<Zst>::new(Uninit::empty());
+        let vec = FixedVec::<Zst>::new(Uninit::empty());
         assert_eq!(vec.capacity(), usize::max_value());
     }
 
@@ -306,5 +361,73 @@ mod tests {
         assert_eq!(
             &unsafe { *allocation.as_ptr() }[..7],
             [0, 1, 2, 3, 4, 5, 6]);
+    }
+
+    /// Tests panics during truncation behave as expected.
+    ///
+    /// Unwinding started in a panic during truncation should not effect `Drop` calls when the
+    /// `Vec` itself is hit by the unwinding. We test this by voluntarily triggering an unwinding
+    /// and counting the number of values which have been dropped regularly (that is, during the
+    /// `Drop` of `Vec` when it is unwound).
+    ///
+    /// Note that this test is already `should_panic` and the observable failure is thus an abort
+    /// from a double panic!
+    #[test]
+    #[should_panic = "Trigger triggered"]
+    fn drop_safe_in_truncation() {
+        use core::cell::Cell;
+
+        #[derive(Debug)]
+        struct Trigger<'a> {
+            panic_on_drop: bool,
+            dropped_counter: &'a Cell<usize>,
+        }
+
+        impl Drop for Trigger<'_> {
+            fn drop(&mut self) {
+                if self.panic_on_drop { panic!("Trigger triggered") }
+                // Record this as a normal drop.
+                self.dropped_counter.set(self.dropped_counter.get() + 1);
+            }
+        }
+
+        struct AbortMismatchedDropCount<'a> {
+            counter: &'a Cell<usize>,
+            expected: usize,
+        }
+
+        impl Drop for AbortMismatchedDropCount<'_> {
+            fn drop(&mut self) {
+                struct ForceDupPanic;
+
+                impl Drop for ForceDupPanic {
+                    fn drop(&mut self) { panic!() }
+                }
+
+                if self.expected != self.counter.get() {
+                    // For duplicate panic, and thus abort
+                    let _x = ForceDupPanic;
+                    panic!();
+                }
+            }
+        }
+
+        let mut allocation: MaybeUninit<[u8; 512]> = MaybeUninit::zeroed();
+        let drops = Cell::new(0);
+
+        // Is `Drop`ed *after* the Vec, and will record the number of usually dropped Triggers.
+        let _abort_mismatch_raii = AbortMismatchedDropCount {
+            counter: &drops,
+            expected: 1,
+        };
+
+        let uninit = Uninit::from(&mut allocation).as_memory();
+        let mut vec = FixedVec::from_available(uninit);
+
+        vec.push(Trigger { panic_on_drop: false, dropped_counter: &drops }).unwrap();
+        vec.push(Trigger { panic_on_drop: true, dropped_counter: &drops }).unwrap();
+
+        // Trigger!
+        vec.truncate(1);
     }
 }
