@@ -125,8 +125,31 @@ impl<T> Rc<'_, T> {
         unimplemented!()
     }
 
+    /// Check if two `Rc`s point to the same data.
+    ///
+    /// This will never compare the values but simply inspect the inner pointers.
+    ///
+    /// ## Example
+    ///
+    /// ```
+    /// use static_alloc::{Slab, rc::Rc};
+    ///
+    /// struct Foo;
+    ///
+    /// let slab: Slab<[u8; 1024]> = Slab::uninit();
+    ///
+    /// // Two Rc's pointing to the same data.
+    /// let foo = slab.rc(Foo).unwrap();
+    /// let foo2 = Rc::clone(&foo);
+    ///
+    /// // An unrelated allocation.
+    /// let not_foo = slab.rc(Foo).unwrap();
+    ///
+    /// assert!( Rc::ptr_eq(&foo, &foo2));
+    /// assert!(!Rc::ptr_eq(&foo, &not_foo));
+    /// ```
     pub fn ptr_eq(this: &Self, other: &Self) -> bool {
-        unimplemented!()
+        this.inner.as_ptr() == other.inner.as_ptr()
     }
 
     /// Get a reference to the inner box.
