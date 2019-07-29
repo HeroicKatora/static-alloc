@@ -70,7 +70,7 @@ impl<T> FixedVec<'_, T> {
     }
 
     /// Returns the number of elements the vector can hold.
-    pub fn capacity(&mut self) -> usize {
+    pub fn capacity(&self) -> usize {
         self.uninit.capacity()
     }
 
