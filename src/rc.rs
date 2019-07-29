@@ -112,7 +112,7 @@ impl<'a, T> Rc<'a, T> {
     /// // No panic. Value has not been dropped.
     /// ```
     pub fn into_raw(rc: Self) -> Option<Uninit<'a, T>> {
-        if Rc::weak_count(&rc) != 1 && Rc::strong_count(&rc) != 1 {
+        if !rc.is_unique() {
             // Note: implicitely decrements `strong`
             return None;
         }
@@ -169,8 +169,38 @@ impl<T> Rc<'_, T> {
         rc.inner().strong.get()
     }
 
+    /// Get a mutable reference to the value, if there are no other pointers to the same value.
+    ///
+    /// Returns `None` otherwise. It is not safe to have two mutable references to the same
+    /// location and other `Rc`s could be used to create more references that are not related by
+    /// lifetime.
+    ///
+    /// ## Example
+    ///
+    /// ```
+    /// use static_alloc::{Slab, rc::Rc};
+    ///
+    /// struct Foo;
+    ///
+    /// let slab: Slab<[u8; 1024]> = Slab::uninit();
+    /// let mut foo = slab.rc(Foo).unwrap();
+    /// assert!(Rc::get_mut(&mut foo).is_some());
+    ///
+    /// // Create a second Rc
+    /// let foo2 = Rc::clone(&foo);
+    /// assert!(Rc::get_mut(&mut foo).is_none());
+    ///
+    /// // Drop the second, now unique again.
+    /// drop(foo2);
+    /// assert!(Rc::get_mut(&mut foo).is_some());
+    /// ```
+    ///
     pub fn get_mut(rc: &mut Self) -> Option<&mut T> {
-        unimplemented!()
+        if rc.is_unique() {
+            Some(unsafe { &mut *rc.as_mut_ptr() })
+        } else {
+            None
+        }
     }
 
     /// Check if two `Rc`s point to the same data.
@@ -293,6 +323,7 @@ impl<T> Clone for Rc<'_, T> {
     }
 }
 
+/// Tests for internal invariants. Outer integration tests in `./tests/rc.rs`.
 #[cfg(test)]
 mod tests {
     use core::alloc::Layout;
