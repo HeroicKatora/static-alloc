@@ -16,6 +16,14 @@ pub struct Rc<'a, T> {
     inner: UninitView<'a, RcBox<T>>,
 }
 
+pub struct Weak<'a, T> {
+    /// Shared view on the memory of the box.
+    ///
+    /// The inner `val` of the box may have been de-initialized already. So we must be very careful
+    /// to never create an actual reference to the box.
+    inner: UninitView<'a, RcBox<T>>,
+}
+
 /// A structured container for the boxed value.
 ///
 /// It's representation is chosen such that it can be cast to `Uninit<T>` and from it given
@@ -112,7 +120,7 @@ impl<'a, T> Rc<'a, T> {
     /// // No panic. Value has not been dropped.
     /// ```
     pub fn into_raw(rc: Self) -> Option<Uninit<'a, T>> {
-        if !rc.is_unique() {
+        if !Rc::is_unique(&rc) {
             // Note: implicitely decrements `strong`
             return None;
         }
@@ -127,8 +135,24 @@ impl<'a, T> Rc<'a, T> {
         }
     }
 
-    pub fn try_unwrap(b: Self) -> Result<(T, Uninit<'a, T>), Self> {
-        unimplemented!()
+    /// Returns the contained value, if the `Rc` has exactly one strong reference.
+    ///
+    /// Also returns the managed memory in the form of a `Weak`. This is unusual but the best
+    /// choice for potentially recovering it. Returning the memory directly is not possible since
+    /// other `Weak<T>` instances may still point to it. If you are not interested in the memory
+    /// you can simply drop the `Weak`.
+    pub fn try_unwrap(rc: Self) -> Result<(T, Weak<'a, T>), Self> {
+        if Rc::strong_count(&rc) != 1 {
+            return Err(rc);
+        }
+
+        rc.dec_strong();
+        let val = unsafe { ptr::read(rc.as_ptr()) };
+
+        let weak = Weak { inner: rc.inner };
+        mem::forget(rc);
+
+        Ok((val, weak))
     }
 }
 
@@ -169,32 +193,6 @@ impl<T> Rc<'_, T> {
         rc.inner().strong.get()
     }
 
-    /// Get a mutable reference to the value, if there are no other pointers to the same value.
-    ///
-    /// Returns `None` otherwise. It is not safe to have two mutable references to the same
-    /// location and other `Rc`s could be used to create more references that are not related by
-    /// lifetime.
-    ///
-    /// ## Example
-    ///
-    /// ```
-    /// use static_alloc::{Slab, rc::Rc};
-    ///
-    /// struct Foo;
-    ///
-    /// let slab: Slab<[u8; 1024]> = Slab::uninit();
-    /// let mut foo = slab.rc(Foo).unwrap();
-    /// assert!(Rc::get_mut(&mut foo).is_some());
-    ///
-    /// // Create a second Rc
-    /// let foo2 = Rc::clone(&foo);
-    /// assert!(Rc::get_mut(&mut foo).is_none());
-    ///
-    /// // Drop the second, now unique again.
-    /// drop(foo2);
-    /// assert!(Rc::get_mut(&mut foo).is_some());
-    /// ```
-    ///
     pub fn get_mut(rc: &mut Self) -> Option<&mut T> {
         if rc.is_unique() {
             Some(unsafe { &mut *rc.as_mut_ptr() })
@@ -244,12 +242,19 @@ impl<T> Rc<'_, T> {
         Rc::strong_count(self) == 1 && Rc::weak_count(self) == 1
     }
 
-    /// Get the pointer to the value without creating intermediate references.
+    /// Get the mutable pointer to the value.
     ///
-    /// This currently relies on the layout of the inner struct.
+    /// This relies on the layout of the inner struct.
     fn as_mut_ptr(&mut self) -> *mut T {
         // `T` is the first member, #[repr(C)] makes this cast well behaved.
         self.inner.as_ptr() as *mut T
+    }
+
+    /// Get the pointer to the value.
+    ///
+    /// This relies on the layout of the inner struct.
+    fn as_ptr(&self) -> *const T {
+        self.inner.as_ptr() as *const T
     }
 
     fn inc_strong(&self) {
@@ -323,7 +328,6 @@ impl<T> Clone for Rc<'_, T> {
     }
 }
 
-/// Tests for internal invariants. Outer integration tests in `./tests/rc.rs`.
 #[cfg(test)]
 mod tests {
     use core::alloc::Layout;
@@ -367,6 +371,7 @@ mod tests {
         // Forbidden in public, but we do not grab mutable references.
         let inner = rc.inner;
         assert_eq!(rc.as_mut_ptr() as *const u8, inner.as_ptr() as *const u8);
+        assert_eq!(rc.as_ptr() as *const u8, inner.as_ptr() as *const u8);
         drop(rc);
 
         unsafe {
