@@ -11,6 +11,7 @@ use core::ptr::{NonNull, null_mut};
 use core::sync::atomic::{AtomicUsize, Ordering};
 
 use super::{Box, Uninit};
+use crate::rc::Rc;
 
 /// Allocator drawing from an inner, statically sized memory resource.
 ///
@@ -422,9 +423,26 @@ impl<T> Slab<T> {
         })
     }
 
+    /// Allocate a [`Box`].
+    ///
+    /// This will allocate some memory with the correct layout for a `Box`, then place the provided
+    /// value into the allocation by constructing an `Box`.
+    ///
+    /// [`Rc`]: ../rc/struct.Rc.html
     pub fn boxed<V>(&self, val: V) -> Option<Box<'_, V>> {
         let alloc = self.get::<V>()?;
         Some(Box::new(val, alloc.uninit))
+    }
+
+    /// Allocate an [`Rc`].
+    ///
+    /// This will allocate some memory with the correct layout for an `Rc`, then place the provided
+    /// value into the allocation by constructing an `Rc`.
+    ///
+    /// [`Rc`]: ../rc/struct.Rc.html
+    pub fn rc<V>(&self, val: V) -> Option<Rc<'_, V>> {
+        let alloc = self.get_layout(Rc::<V>::layout())?;
+        Some(Rc::new(val, alloc.uninit))
     }
 
     /// Observe the current level.

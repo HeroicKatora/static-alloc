@@ -49,9 +49,10 @@
 
 // Copyright 2019 Andreas Molzer
 #![no_std]
-#[deny(missing_docs)]
+#![deny(missing_docs)]
 
 pub mod boxed;
+pub mod rc;
 pub mod slab;
 pub mod uninit;
 pub mod fixed_vec;
