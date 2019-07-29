@@ -3,7 +3,7 @@
 //! See [`Rc`] for more information.
 //!
 //! [`Rc`]: ./struct.Rc.html
-use core::{mem, ptr};
+use core::{fmt, mem, ops, ptr};
 use core::alloc::Layout;
 use core::cell::Cell;
 
@@ -519,6 +519,14 @@ impl<T> Drop for Rc<'_, T> {
     }
 }
 
+impl<T> ops::Deref for Rc<'_, T> {
+    type Target = T;
+
+    fn deref(&self) -> &T {
+        &self.inner().val
+    }
+}
+
 impl<T> Clone for Rc<'_, T> {
     /// Clone the `Rc`.
     ///
@@ -582,6 +590,24 @@ impl<T> Clone for Weak<'_, T> {
         Weak {
             inner: self.inner,
         }
+    }
+}
+
+impl<T: fmt::Display> fmt::Display for Rc<'_, T> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        fmt::Display::fmt(&**self, f)
+    }
+}
+
+impl<T: fmt::Debug> fmt::Debug for Rc<'_, T> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        fmt::Debug::fmt(&**self, f)
+    }
+}
+
+impl<T> fmt::Pointer for Rc<'_, T> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        fmt::Pointer::fmt(&self.as_ptr(), f)
     }
 }
 
