@@ -41,6 +41,8 @@ fn reference_juggling() {
     drop(foo2);
     assert!(rc::Rc::get_mut(&mut foo).is_some());
 
-    let (val, _) = rc::Rc::try_unwrap(foo).ok().unwrap();
+    let (val, weak) = rc::Rc::try_unwrap(foo).ok().unwrap();
+    assert_eq!(rc::Weak::strong_count(&weak), 0);
+    assert_eq!(rc::Weak::weak_count(&weak), 1);
     mem::forget(val);
 }

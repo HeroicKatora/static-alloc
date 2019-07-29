@@ -267,14 +267,58 @@ impl<T> Rc<'_, T> {
         self.inner().strong.set(val);
     }
 
-    fn inc_weak(&self) {
-        let val = Self::weak_count(self) + 1;
-        self.inner().weak.set(val);
-    }
-
     fn dec_weak(&self) {
         let val = Self::weak_count(self) - 1;
         self.inner().weak.set(val);
+    }
+}
+
+impl<T> Weak<'_, T> {
+    pub fn strong_count(&self) -> usize {
+        self.strong().get()
+    }
+
+    /// Gets the number of weak pointers pointing at the value.
+    ///
+    /// ## Example
+    ///
+    /// ```
+    /// use static_alloc::{rc, Slab};
+    ///
+    /// struct Foo;
+    ///
+    /// let slab: Slab<[u8; 1024]> = Slab::uninit();
+    /// let rc = slab.rc(Foo).unwrap();
+    /// let (_, weak) = rc::Rc::try_unwrap(rc).ok().unwrap();
+    ///
+    /// assert_eq!(rc::Weak::weak_count(&weak), 1);
+    /// ```
+    pub fn weak_count(&self) -> usize {
+        self.weak().get()
+    }
+
+    /// Get a reference to the weak counter.
+    ///
+    /// Avoids potential UB, never creates a reference to the potentially dead `val`.
+    fn weak(&self) -> &Cell<usize> {
+        unsafe { &(*self.inner.as_ptr()).weak }
+    }
+
+    /// Get a reference to the strong counter.
+    ///
+    /// Avoids potential UB, never creates a reference to the potentially dead `val`.
+    fn strong(&self) -> &Cell<usize> {
+        unsafe { &(*self.inner.as_ptr()).strong }
+    }
+
+    fn inc_weak(&self) {
+        let val = Weak::weak_count(self);
+        self.weak().set(val + 1);
+    }
+
+    fn dec_weak(&self) {
+        let val = Weak::weak_count(self);
+        self.weak().set(val - 1);
     }
 }
 
@@ -320,9 +364,66 @@ impl<T> Drop for Rc<'_, T> {
 }
 
 impl<T> Clone for Rc<'_, T> {
+    /// Clone the `Rc`.
+    ///
+    /// This will increment the strong reference count. Only an Rc pointing to a unique value can
+    /// unwrap or point to the value mutably.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use static_alloc::{Slab, rc::Rc};
+    ///
+    /// struct Foo;
+    ///
+    /// let slab: Slab<[u8; 1024]> = Slab::uninit();
+    ///
+    /// let mut foo  = slab.rc(Foo).unwrap();
+    /// assert!(Rc::get_mut(&mut foo).is_some());
+    ///
+    /// let foo2 = Rc::clone(&foo);
+    /// assert!(Rc::get_mut(&mut foo).is_none());
+    /// ```
     fn clone(&self) -> Self {
         self.inc_strong();
         Rc {
+            inner: self.inner,
+        }
+    }
+}
+
+impl<T> Drop for Weak<'_, T> {
+    fn drop(&mut self) {
+        self.dec_weak();
+        // It doesn't matter what happens to the memory.
+    }
+}
+
+impl<T> Clone for Weak<'_, T> {
+    /// Clone the `Weak`.
+    ///
+    /// This will increment the weak reference count.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use static_alloc::{rc, Slab};
+    ///
+    /// struct Foo;
+    ///
+    /// let slab: Slab<[u8; 1024]> = Slab::uninit();
+    /// let foo = slab.rc(Foo).unwrap();
+    ///
+    /// let (_, weak) = rc::Rc::try_unwrap(foo).ok().unwrap();
+    /// assert_eq!(weak.weak_count(), 1);
+    ///
+    /// let weak2 = weak.clone();
+    /// assert_eq!(weak.weak_count(), 2);
+    /// assert_eq!(weak2.weak_count(), 2);
+    /// ```
+    fn clone(&self) -> Self {
+        self.inc_weak();
+        Weak {
             inner: self.inner,
         }
     }
@@ -333,7 +434,7 @@ mod tests {
     use core::alloc::Layout;
     use core::cell::Cell;
 
-    use super::{RcBox, Rc};
+    use super::{RcBox, Rc, Weak};
     use crate::Slab;
 
     #[test]
@@ -368,12 +469,24 @@ mod tests {
         drop(rc);
 
         let mut rc = slab.rc(Duck).unwrap();
+        assert_eq!(rc.as_mut_ptr() as *const u8, rc.inner.as_ptr() as *const u8);
+        assert_eq!(rc.as_ptr() as *const u8, rc.inner.as_ptr() as *const u8);
+
+        let rc = slab.rc(Duck).unwrap();
         // Forbidden in public, but we do not grab mutable references.
         let inner = rc.inner;
-        assert_eq!(rc.as_mut_ptr() as *const u8, inner.as_ptr() as *const u8);
-        assert_eq!(rc.as_ptr() as *const u8, inner.as_ptr() as *const u8);
         drop(rc);
+        unsafe {
+            assert_eq!((*inner.as_ptr()).strong.get(), 0);
+            assert_eq!((*inner.as_ptr()).weak.get(), 0);
+        }
 
+        let rc = slab.rc(Duck).unwrap();
+        let (_, weak) = Rc::try_unwrap(rc).ok().unwrap();
+        assert_eq!(Weak::strong_count(&weak), 0);
+        assert_eq!(Weak::weak_count(&weak), 1);
+        let inner = weak.inner;
+        drop(weak);
         unsafe {
             assert_eq!((*inner.as_ptr()).strong.get(), 0);
             assert_eq!((*inner.as_ptr()).weak.get(), 0);
