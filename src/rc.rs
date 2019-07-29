@@ -109,7 +109,33 @@ impl<'a, T> Rc<'a, T> {
 }
 
 impl<T> Rc<'_, T> {
+    /// Get the layout that needs to be allocated to create the inner structure of an `Rc`.
+    ///
+    /// You should not rely on the value returned here. The only guarantee is that the size of the
+    /// layout is at least as large as the input type.
+    ///
+    /// An `Rc` does not simply point to a lone instance of a type but instead adds some small
+    /// metadata (two pointer-sized counters). To keep the implementation details private, this
+    /// method allows allocation of properly sized regions without exposing the exact type that
+    /// will be stored on the heap.
+    ///
+    /// ```
+    /// use static_alloc::{Slab, rc::Rc};
+    ///
+    /// struct Foo(u32);
+    ///
+    /// let slab: Slab<[u8; 1024]> = Slab::uninit();
+    /// let layout = Rc::<Foo>::layout();
+    /// assert!(layout.size() >= 4);
+    ///
+    /// let memory = slab.get_layout(layout).unwrap();
+    ///
+    /// // later:
+    ///
+    /// let rc = Rc::new(Foo(0), memory.uninit);
+    /// ```
     pub fn layout() -> Layout {
+        // FIXME: this should really be `const` but `Layout` does not offer that yet.
         Layout::new::<RcBox<T>>()
     }
 
@@ -240,6 +266,7 @@ impl<T> Clone for Rc<'_, T> {
 
 #[cfg(test)]
 mod tests {
+    use core::alloc::Layout;
     use core::cell::Cell;
 
     use super::{RcBox, Rc};
@@ -285,5 +312,16 @@ mod tests {
             assert_eq!((*inner.as_ptr()).strong.get(), 0);
             assert_eq!((*inner.as_ptr()).weak.get(), 0);
         }
+    }
+
+    #[test]
+    #[should_panic = "inner layout"]
+    fn wrong_layout_panics() {
+        struct Foo(u32);
+
+        let slab: Slab<[u8; 1024]> = Slab::uninit();
+        let wrong_alloc = slab.get_layout(Layout::new::<Foo>()).unwrap();
+
+        let _ = Rc::new(Foo(0), wrong_alloc.uninit);
     }
 }
