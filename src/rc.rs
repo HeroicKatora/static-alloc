@@ -89,9 +89,18 @@ impl<'a, T> Rc<'a, T> {
         }
     }
 
+    /// Wrap a raw initialized value back into an `Rc`.
+    ///
+    /// ## Safety
+    /// The block must originate from a previous call to [`into_raw`] and only the value must have
+    /// been modified. The value must still be valid.
     pub unsafe fn from_raw(init: Uninit<'a, T>) -> Self {
-        // TODO: offset from the val field.
-        unimplemented!()
+        debug_assert!(init.fits(Self::layout()), "Provided memory must fit the inner layout");
+        let inner = init.cast().unwrap();
+
+        Rc {
+            inner: inner.into(),
+        }
     }
 
     /// Try to extract the memory.
@@ -116,13 +125,13 @@ impl<'a, T> Rc<'a, T> {
     /// let slab: Slab<[u8; 1024]> = Slab::uninit();
     /// let foo = slab.rc(HotPotato).unwrap();
     ///
-    /// let raw = Rc::into_raw(foo).unwrap();
+    /// let raw = Rc::into_raw(foo).ok().unwrap();
     /// // No panic. Value has not been dropped.
     /// ```
-    pub fn into_raw(rc: Self) -> Option<Uninit<'a, T>> {
+    pub fn into_raw(rc: Self) -> Result<Uninit<'a, T>, Self> {
         if !Rc::is_unique(&rc) {
             // Note: implicitely decrements `strong`
-            return None;
+            return Err(rc);
         }
 
         let ptr = rc.inner.as_non_null();
@@ -131,7 +140,7 @@ impl<'a, T> Rc<'a, T> {
         unsafe {
             // SAFETY: restored the memory we just forgot. We are the only reference to it, so it
             // is fine to restore the original unqiue allocation reference.
-            Some(Uninit::from_memory(ptr.cast(), len).cast().unwrap())
+            Ok(Uninit::from_memory(ptr.cast(), len).cast().unwrap())
         }
     }
 
@@ -153,6 +162,31 @@ impl<'a, T> Rc<'a, T> {
         mem::forget(rc);
 
         Ok((val, weak))
+    }
+
+    /// Create a new `Weak` pointer to the value.
+    ///
+    /// The weak pointer shares ownership over the memory but not over the value itself.
+    ///
+    /// ## Example
+    ///
+    /// ```
+    /// use static_alloc::{Slab, rc::Rc};
+    ///
+    /// struct Foo;
+    ///
+    /// let slab: Slab<[u8; 1024]> = Slab::uninit();
+    /// let foo = slab.rc(Foo).unwrap();
+    /// let weak = Rc::downgrade(&foo);
+    ///
+    /// assert_eq!(Rc::weak_count(&foo), 2);
+    /// drop(foo);
+    ///
+    /// assert_eq!(weak.weak_count(), 1);
+    /// ```
+    pub fn downgrade(rc: &Self) -> Weak<'a, T> {
+        rc.inc_weak();
+        Weak { inner: rc.inner }
     }
 }
 
@@ -265,6 +299,11 @@ impl<T> Rc<'_, T> {
     fn dec_strong(&self) {
         let val = Self::strong_count(self) - 1;
         self.inner().strong.set(val);
+    }
+
+    fn inc_weak(&self) {
+        let val = Self::weak_count(self) + 1;
+        self.inner().weak.set(val);
     }
 
     fn dec_weak(&self) {

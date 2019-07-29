@@ -43,6 +43,11 @@ fn reference_juggling() {
     drop(foo2);
     assert!(rc::Rc::get_mut(&mut foo).is_some());
 
+    // A weak pointer will also not allow a reference.
+    let weak = rc::Rc::downgrade(&foo);
+    assert!(rc::Rc::get_mut(&mut foo).is_none());
+    drop(weak);
+
     let (val, weak) = rc::Rc::try_unwrap(foo).ok().unwrap();
     assert_eq!(rc::Weak::strong_count(&weak), 0);
     assert_eq!(rc::Weak::weak_count(&weak), 1);
@@ -51,4 +56,19 @@ fn reference_juggling() {
     assert_eq!(ptr, mem.as_non_null());
 
     mem::forget(val);
+}
+
+#[test]
+fn raw_and_back() {
+    let memory: Slab<[u8; 1024]> = Slab::uninit();
+
+    let rc = memory.rc(0usize).unwrap();
+    assert_eq!(rc::Rc::strong_count(&rc), 1);
+    assert_eq!(rc::Rc::weak_count(&rc), 1);
+
+    let raw = rc::Rc::into_raw(rc).ok().unwrap();
+    let ptr_to_val = raw.as_non_null();
+
+    let mut rc = unsafe { rc::Rc::from_raw(raw) };
+    assert_eq!(rc::Rc::get_mut(&mut rc).unwrap() as *mut _, ptr_to_val.as_ptr());
 }
