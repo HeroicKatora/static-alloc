@@ -3,7 +3,7 @@
 //! [See `FixedVec` for the main information][`FixedVec`].
 //!
 //! [`FixedVec`]: struct.FixedVec.html
-use core::{ops, ptr, slice};
+use core::{borrow, cmp, hash, ops, ptr, slice};
 use crate::uninit::Uninit;
 
 /// A `Vec`-like structure that does not manage its allocation.
@@ -129,6 +129,15 @@ impl<T> FixedVec<'_, T> {
         self.length
     }
 
+    /// Set the raw length.
+    ///
+    /// ## Safety
+    /// * `new_len` must be smaller or equal `self.capacity()`
+    /// * The caller must ensure that all newly referenced elements are properly initialized.
+    pub unsafe fn set_len(&mut self, new_len: usize) {
+        self.length = new_len;
+    }
+
     /// Returns the number of elements the vector can hold.
     pub fn capacity(&self) -> usize {
         self.uninit.capacity()
@@ -207,6 +216,23 @@ impl<T> FixedVec<'_, T> {
             uninit: new_uninit,
             length: new_len,
         }
+    }
+
+    /// Extend the vector with as many elements as fit.
+    ///
+    /// Returns the iterator with all elements that were not pushed into the vector.
+    pub fn fill<I: IntoIterator<Item=T>>(&mut self, iter: I)
+        -> I::IntoIter
+    {
+        let unused = self.capacity() - self.len();
+        let mut iter = iter.into_iter();
+        for item in iter.by_ref().take(unused) {
+            unsafe {
+                *self.end_mut_ptr() = item;
+                self.set_len(self.length + 1);
+            }
+        }
+        iter
     }
 
     fn head_tail_mut(&mut self) -> (Uninit<'_, [T]>, Uninit<'_, [T]>) {
@@ -289,6 +315,79 @@ impl<T, I> ops::IndexMut<I> for FixedVec<'_, T>
 {
     fn index_mut(&mut self, idx: I) -> &mut I::Output {
         ops::IndexMut::index_mut(&mut**self, idx)
+    }
+}
+
+impl<'a, 'b, T: PartialEq> PartialEq<FixedVec<'b, T>> for FixedVec<'a, T> {
+    #[inline]
+    fn eq(&self, other: &FixedVec<T>) -> bool {
+        PartialEq::eq(&**self, &**other)
+    }
+    #[inline]
+    fn ne(&self, other: &FixedVec<T>) -> bool {
+        PartialEq::ne(&**self, &**other)
+    }
+}
+
+impl<'a, 'b, T: PartialOrd> PartialOrd<FixedVec<'b, T>> for FixedVec<'a, T> {
+    #[inline]
+    fn partial_cmp(&self, other: &FixedVec<T>) -> Option<cmp::Ordering> {
+        PartialOrd::partial_cmp(&**self, &**other)
+    }
+    #[inline]
+    fn lt(&self, other: &FixedVec<T>) -> bool {
+        PartialOrd::lt(&**self, &**other)
+    }
+    #[inline]
+    fn le(&self, other: &FixedVec<T>) -> bool {
+        PartialOrd::le(&**self, &**other)
+    }
+    #[inline]
+    fn ge(&self, other: &FixedVec<T>) -> bool {
+        PartialOrd::ge(&**self, &**other)
+    }
+    #[inline]
+    fn gt(&self, other: &FixedVec<T>) -> bool {
+        PartialOrd::gt(&**self, &**other)
+    }
+}
+
+impl<T: Ord> Ord for FixedVec<'_, T> {
+    #[inline]
+    fn cmp(&self, other: &FixedVec<T>) -> cmp::Ordering {
+        Ord::cmp(&**self, &**other)
+    }
+}
+
+impl<T: Eq> Eq for FixedVec<'_, T> { }
+
+impl<T: hash::Hash> hash::Hash for FixedVec<'_, T> {
+    fn hash<H: hash::Hasher>(&self, state: &mut H) {
+        hash::Hash::hash(&**self, state)
+    }
+}
+
+impl<T> borrow::Borrow<[T]> for FixedVec<'_, T> {
+    fn borrow(&self) -> &[T] {
+        &**self
+    }
+}
+
+impl<T> borrow::BorrowMut<[T]> for FixedVec<'_, T> {
+    fn borrow_mut(&mut self) -> &mut [T] {
+        &mut **self
+    }
+}
+
+impl<T> AsRef<[T]> for FixedVec<'_, T> {
+    fn as_ref(&self) -> &[T] {
+        &**self
+    }
+}
+
+impl<T> AsMut<[T]> for FixedVec<'_, T> {
+    fn as_mut(&mut self) -> &mut [T] {
+        &mut **self
     }
 }
 

@@ -116,3 +116,20 @@ fn truncations() {
     vec.clear();
     assert_eq!(drops.get(), 16);
 }
+
+#[test]
+fn hashing() {
+    use std::collections::HashMap;
+    const KEY: &[usize] = &[0, 1, 2, 3];
+    const VAL: &str = "mapped";
+    let memory: Slab<[u8; 1024]> = Slab::uninit();
+
+    let mut key = memory.fixed_vec(4).unwrap();
+    assert_eq!(key.fill(KEY.iter().cloned()).len(), 0);
+
+    let map = Some((key, VAL))
+        .into_iter()
+        .collect::<HashMap<_, _>>();
+
+    assert_eq!(map.get(KEY).cloned(), Some(VAL));
+}
