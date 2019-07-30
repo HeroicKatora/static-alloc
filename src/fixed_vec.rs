@@ -544,12 +544,15 @@ mod tests {
         // Is `Drop`ed *after* the Vec, and will record the number of usually dropped Triggers.
         let _abort_mismatch_raii = AbortMismatchedDropCount {
             counter: &drops,
-            expected: 1,
+            expected: 2,
         };
 
         let uninit = Uninit::from(&mut allocation).as_memory();
         let mut vec = FixedVec::from_available(uninit);
 
+        vec.push(Trigger { panic_on_drop: false, dropped_counter: &drops }).unwrap();
+        // This one is within the truncated tail but is not dropped until unwind as truncate
+        // panics. If we were to skip dropping all values of the tail in unwind we'd notice.
         vec.push(Trigger { panic_on_drop: false, dropped_counter: &drops }).unwrap();
         vec.push(Trigger { panic_on_drop: true, dropped_counter: &drops }).unwrap();
 
