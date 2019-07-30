@@ -1,3 +1,11 @@
+## v0.0.7
+
+- Introduces `Rc`, a reference counter owned value.
+- Improves `FixedVec` by adding many standard trait impls.
+- Added `Slab` methods: `rc` and `fixed_vec` to create respective containers.
+- Added `FixedVec` methods: `truncate` and `clear`.
+- Added `Uninit::fits` to test if a `cast` would succeed without performing it.
+
 ## v0.0.6
 
 - Introduces `Box`, an owned value within an `Uninit` allocation
