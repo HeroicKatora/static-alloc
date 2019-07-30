@@ -115,6 +115,15 @@ impl<T> FixedVec<'_, T> {
         }
     }
 
+    /// Remove all elements.
+    ///
+    /// This is an alias for [`truncate(0)`][truncate].
+    ///
+    /// [truncate]: #method.truncate
+    pub fn clear(&mut self) {
+        self.truncate(0)
+    }
+
     /// Returns the number of elements in the vector.
     pub fn len(&self) -> usize {
         self.length

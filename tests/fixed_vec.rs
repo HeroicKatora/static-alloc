@@ -1,5 +1,5 @@
 use core::mem::{self, MaybeUninit};
-use static_alloc::{FixedVec, Uninit};
+use static_alloc::{FixedVec, Slab, Uninit};
 
 #[test]
 fn create() {
@@ -11,6 +11,13 @@ fn create() {
     let mut memory: MaybeUninit<[u8; 16]> = MaybeUninit::uninit();
     let uninit = Uninit::from(&mut memory).cast_slice().unwrap();
     let vec = FixedVec::<u8>::new(uninit);
+    assert_eq!(vec.len(), 0);
+    assert!(vec.is_empty());
+    assert_eq!(vec.capacity(), 16);
+
+    // This should be exactly enough to fulfill the request.
+    let slab: Slab<[usize; 16]> = Slab::uninit();
+    let vec = slab.fixed_vec::<usize>(16).unwrap();
     assert_eq!(vec.len(), 0);
     assert!(vec.is_empty());
     assert_eq!(vec.capacity(), 16);
@@ -105,5 +112,7 @@ fn truncations() {
     vec.truncate(0);
     assert_eq!(drops.get(), 16);
     vec.truncate(0);
+    assert_eq!(drops.get(), 16);
+    vec.clear();
     assert_eq!(drops.get(), 16);
 }
