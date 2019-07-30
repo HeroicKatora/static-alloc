@@ -1,6 +1,6 @@
 [package]
 name = "static-alloc"
-version = "0.0.6"
+version = "0.0.7"
 description = "Replacements for `alloc` without dynamic allocation"
 authors = ["Andreas Molzer <andreas.molzer@gmx.de>"]
 edition = "2018"
