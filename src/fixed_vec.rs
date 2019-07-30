@@ -265,6 +265,24 @@ impl<T> Drop for FixedVec<'_, T> {
     }
 }
 
+impl<T, I> ops::Index<I> for FixedVec<'_, T>
+    where I: slice::SliceIndex<[T]>,
+{
+    type Output = I::Output;
+
+    fn index(&self, idx: I) -> &I::Output {
+        ops::Index::index(&**self, idx)
+    }
+}
+
+impl<T, I> ops::IndexMut<I> for FixedVec<'_, T>
+    where I: slice::SliceIndex<[T]>,
+{
+    fn index_mut(&mut self, idx: I) -> &mut I::Output {
+        ops::IndexMut::index_mut(&mut**self, idx)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::FixedVec;

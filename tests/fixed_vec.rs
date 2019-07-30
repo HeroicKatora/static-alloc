@@ -17,6 +17,20 @@ fn create() {
 }
 
 #[test]
+fn indexing() {
+    let mut memory: MaybeUninit<[u8; 16]> = MaybeUninit::uninit();
+    let uninit = Uninit::from(&mut memory).cast_slice().unwrap();
+    let mut vec = FixedVec::<u8>::new(uninit);
+
+    assert_eq!(&vec[..], []);
+    vec.push(0).unwrap();
+    assert_eq!(&vec[..], [0]);
+    assert_eq!(&vec[1..], []);
+    vec[0] = 1;
+    assert_eq!(vec.pop(), Some(1));
+}
+
+#[test]
 fn filling() {
     const LEN: usize = 16;
 
