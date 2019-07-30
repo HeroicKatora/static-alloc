@@ -3,7 +3,7 @@
 //! [See `FixedVec` for the main information][`FixedVec`].
 //!
 //! [`FixedVec`]: struct.FixedVec.html
-use core::{ops, ptr, slice};
+use core::{borrow, cmp, hash, ops, ptr, slice};
 use crate::uninit::Uninit;
 
 /// A `Vec`-like structure that does not manage its allocation.
@@ -46,6 +46,57 @@ pub struct FixedVec<'a, T> {
 }
 
 impl<T> FixedVec<'_, T> {
+    /// Shorten the vector to a maximum length.
+    ///
+    /// If the length is not larger than `len` this has no effect.
+    ///
+    /// The tail of the vector is dropped starting from the last element. This is opposite to
+    /// ([WIP] interface does not yet exist) `.drain(len..).for_each(drop)`.
+    ///
+    /// ## Example
+    ///
+    /// ```
+    /// # use core::mem::MaybeUninit;
+    /// # use static_alloc::{FixedVec, Uninit};
+    ///
+    /// let mut memory: MaybeUninit<[usize; 4]> = MaybeUninit::uninit();
+    /// let uninit = Uninit::from(&mut memory).cast_slice().unwrap();
+    /// let mut vec = FixedVec::new(uninit);
+    ///
+    /// vec.push(0usize);
+    /// vec.push(1usize);
+    /// vec.push(2usize);
+    ///
+    /// assert_eq!(vec.as_slice(), [0, 1, 2]);
+    /// vec.truncate(1);
+    /// assert_eq!(vec.as_slice(), [0]);
+    /// ```
+    pub fn truncate(&mut self, len: usize) {
+        struct SetLenOnDrop<'a> {
+            len: &'a mut usize,
+            local_len: usize,
+        }
+
+        impl Drop for SetLenOnDrop<'_> {
+            fn drop(&mut self) {
+                *self.len = self.local_len;
+            }
+        }
+
+        let mut ptr = self.end_mut_ptr();
+        let current_length = self.length;
+        let mut set_len = SetLenOnDrop { len: &mut self.length, local_len: current_length };
+
+        for _ in len..current_length {
+            set_len.local_len -= 1;
+
+            unsafe {
+                ptr = ptr.offset(-1);
+                ptr::drop_in_place(ptr);
+            }
+        }
+    }
+
     /// Extracts a slice containing the entire vector.
     pub fn as_slice(&self) -> &[T] {
         unsafe {
@@ -64,13 +115,31 @@ impl<T> FixedVec<'_, T> {
         }
     }
 
+    /// Remove all elements.
+    ///
+    /// This is an alias for [`truncate(0)`][truncate].
+    ///
+    /// [truncate]: #method.truncate
+    pub fn clear(&mut self) {
+        self.truncate(0)
+    }
+
     /// Returns the number of elements in the vector.
     pub fn len(&self) -> usize {
         self.length
     }
 
+    /// Set the raw length.
+    ///
+    /// ## Safety
+    /// * `new_len` must be smaller or equal `self.capacity()`
+    /// * The caller must ensure that all newly referenced elements are properly initialized.
+    pub unsafe fn set_len(&mut self, new_len: usize) {
+        self.length = new_len;
+    }
+
     /// Returns the number of elements the vector can hold.
-    pub fn capacity(&mut self) -> usize {
+    pub fn capacity(&self) -> usize {
         self.uninit.capacity()
     }
 
@@ -149,12 +218,33 @@ impl<T> FixedVec<'_, T> {
         }
     }
 
+    /// Extend the vector with as many elements as fit.
+    ///
+    /// Returns the iterator with all elements that were not pushed into the vector.
+    pub fn fill<I: IntoIterator<Item=T>>(&mut self, iter: I)
+        -> I::IntoIter
+    {
+        let unused = self.capacity() - self.len();
+        let mut iter = iter.into_iter();
+        for item in iter.by_ref().take(unused) {
+            unsafe {
+                *self.end_mut_ptr() = item;
+                self.set_len(self.length + 1);
+            }
+        }
+        iter
+    }
+
     fn head_tail_mut(&mut self) -> (Uninit<'_, [T]>, Uninit<'_, [T]>) {
         // Borrow, do not affect the actual allocation by throwing away possible elements.
         let mut all = self.uninit.borrow_mut();
         // This must always be possible. `self.length` is nevery greater than the capacity.
         let tail = all.split_at(self.length).unwrap();
         (all, tail)
+    }
+
+    fn end_mut_ptr(&mut self) -> *mut T {
+        unsafe { self.as_mut_ptr().add(self.length) }
     }
 }
 
@@ -207,6 +297,97 @@ impl<T> Drop for FixedVec<'_, T> {
         unsafe {
             ptr::drop_in_place(self.as_mut_slice())
         }
+    }
+}
+
+impl<T, I> ops::Index<I> for FixedVec<'_, T>
+    where I: slice::SliceIndex<[T]>,
+{
+    type Output = I::Output;
+
+    fn index(&self, idx: I) -> &I::Output {
+        ops::Index::index(&**self, idx)
+    }
+}
+
+impl<T, I> ops::IndexMut<I> for FixedVec<'_, T>
+    where I: slice::SliceIndex<[T]>,
+{
+    fn index_mut(&mut self, idx: I) -> &mut I::Output {
+        ops::IndexMut::index_mut(&mut**self, idx)
+    }
+}
+
+impl<'a, 'b, T: PartialEq> PartialEq<FixedVec<'b, T>> for FixedVec<'a, T> {
+    #[inline]
+    fn eq(&self, other: &FixedVec<T>) -> bool {
+        PartialEq::eq(&**self, &**other)
+    }
+    #[inline]
+    fn ne(&self, other: &FixedVec<T>) -> bool {
+        PartialEq::ne(&**self, &**other)
+    }
+}
+
+impl<'a, 'b, T: PartialOrd> PartialOrd<FixedVec<'b, T>> for FixedVec<'a, T> {
+    #[inline]
+    fn partial_cmp(&self, other: &FixedVec<T>) -> Option<cmp::Ordering> {
+        PartialOrd::partial_cmp(&**self, &**other)
+    }
+    #[inline]
+    fn lt(&self, other: &FixedVec<T>) -> bool {
+        PartialOrd::lt(&**self, &**other)
+    }
+    #[inline]
+    fn le(&self, other: &FixedVec<T>) -> bool {
+        PartialOrd::le(&**self, &**other)
+    }
+    #[inline]
+    fn ge(&self, other: &FixedVec<T>) -> bool {
+        PartialOrd::ge(&**self, &**other)
+    }
+    #[inline]
+    fn gt(&self, other: &FixedVec<T>) -> bool {
+        PartialOrd::gt(&**self, &**other)
+    }
+}
+
+impl<T: Ord> Ord for FixedVec<'_, T> {
+    #[inline]
+    fn cmp(&self, other: &FixedVec<T>) -> cmp::Ordering {
+        Ord::cmp(&**self, &**other)
+    }
+}
+
+impl<T: Eq> Eq for FixedVec<'_, T> { }
+
+impl<T: hash::Hash> hash::Hash for FixedVec<'_, T> {
+    fn hash<H: hash::Hasher>(&self, state: &mut H) {
+        hash::Hash::hash(&**self, state)
+    }
+}
+
+impl<T> borrow::Borrow<[T]> for FixedVec<'_, T> {
+    fn borrow(&self) -> &[T] {
+        &**self
+    }
+}
+
+impl<T> borrow::BorrowMut<[T]> for FixedVec<'_, T> {
+    fn borrow_mut(&mut self) -> &mut [T] {
+        &mut **self
+    }
+}
+
+impl<T> AsRef<[T]> for FixedVec<'_, T> {
+    fn as_ref(&self) -> &[T] {
+        &**self
+    }
+}
+
+impl<T> AsMut<[T]> for FixedVec<'_, T> {
+    fn as_mut(&mut self) -> &mut [T] {
+        &mut **self
     }
 }
 
@@ -272,7 +453,7 @@ mod tests {
     #[test]
     fn zst() {
         struct Zst;
-        let mut vec = FixedVec::<Zst>::new(Uninit::empty());
+        let vec = FixedVec::<Zst>::new(Uninit::empty());
         assert_eq!(vec.capacity(), usize::max_value());
     }
 
@@ -306,5 +487,76 @@ mod tests {
         assert_eq!(
             &unsafe { *allocation.as_ptr() }[..7],
             [0, 1, 2, 3, 4, 5, 6]);
+    }
+
+    /// Tests panics during truncation behave as expected.
+    ///
+    /// Unwinding started in a panic during truncation should not effect `Drop` calls when the
+    /// `Vec` itself is hit by the unwinding. We test this by voluntarily triggering an unwinding
+    /// and counting the number of values which have been dropped regularly (that is, during the
+    /// `Drop` of `Vec` when it is unwound).
+    ///
+    /// Note that this test is already `should_panic` and the observable failure is thus an abort
+    /// from a double panic!
+    #[test]
+    #[should_panic = "Trigger triggered"]
+    fn drop_safe_in_truncation() {
+        use core::cell::Cell;
+
+        #[derive(Debug)]
+        struct Trigger<'a> {
+            panic_on_drop: bool,
+            dropped_counter: &'a Cell<usize>,
+        }
+
+        impl Drop for Trigger<'_> {
+            fn drop(&mut self) {
+                if self.panic_on_drop { panic!("Trigger triggered") }
+                // Record this as a normal drop.
+                self.dropped_counter.set(self.dropped_counter.get() + 1);
+            }
+        }
+
+        struct AbortMismatchedDropCount<'a> {
+            counter: &'a Cell<usize>,
+            expected: usize,
+        }
+
+        impl Drop for AbortMismatchedDropCount<'_> {
+            fn drop(&mut self) {
+                struct ForceDupPanic;
+
+                impl Drop for ForceDupPanic {
+                    fn drop(&mut self) { panic!() }
+                }
+
+                if self.expected != self.counter.get() {
+                    // For duplicate panic, and thus abort
+                    let _x = ForceDupPanic;
+                    panic!();
+                }
+            }
+        }
+
+        let mut allocation: MaybeUninit<[u8; 512]> = MaybeUninit::zeroed();
+        let drops = Cell::new(0);
+
+        // Is `Drop`ed *after* the Vec, and will record the number of usually dropped Triggers.
+        let _abort_mismatch_raii = AbortMismatchedDropCount {
+            counter: &drops,
+            expected: 2,
+        };
+
+        let uninit = Uninit::from(&mut allocation).as_memory();
+        let mut vec = FixedVec::from_available(uninit);
+
+        vec.push(Trigger { panic_on_drop: false, dropped_counter: &drops }).unwrap();
+        // This one is within the truncated tail but is not dropped until unwind as truncate
+        // panics. If we were to skip dropping all values of the tail in unwind we'd notice.
+        vec.push(Trigger { panic_on_drop: false, dropped_counter: &drops }).unwrap();
+        vec.push(Trigger { panic_on_drop: true, dropped_counter: &drops }).unwrap();
+
+        // Trigger!
+        vec.truncate(1);
     }
 }

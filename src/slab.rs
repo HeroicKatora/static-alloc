@@ -10,7 +10,7 @@ use core::mem::{self, MaybeUninit};
 use core::ptr::{NonNull, null_mut};
 use core::sync::atomic::{AtomicUsize, Ordering};
 
-use super::{Box, Uninit};
+use super::{Box, FixedVec, Uninit};
 use crate::rc::Rc;
 
 /// Allocator drawing from an inner, statically sized memory resource.
@@ -425,19 +425,42 @@ impl<T> Slab<T> {
 
     /// Allocate a [`Box`].
     ///
-    /// This will allocate some memory with the correct layout for a `Box`, then place the provided
-    /// value into the allocation by constructing an `Box`.
+    /// This will allocate some memory with the correct layout for a [`Box`], then place the
+    /// provided value into the allocation by constructing an [`Box`].
     ///
-    /// [`Rc`]: ../rc/struct.Rc.html
+    /// [`Box`]: ../boxed/struct.Box.html
     pub fn boxed<V>(&self, val: V) -> Option<Box<'_, V>> {
         let alloc = self.get::<V>()?;
         Some(Box::new(val, alloc.uninit))
     }
 
+    /// Allocate a [`FixedVec`].
+    ///
+    /// This will allocate some memory with the correct layout for a [`FixedVec`] of the given
+    /// capacity (in elements) and wrap it. Returns `None` if it is not possible to allocate the
+    /// layout.
+    ///
+    /// [`FixedVec`]: ../fixed_vec/struct.FixedVec.html
+    pub fn fixed_vec<V>(&self, capacity: usize) -> Option<FixedVec<'_, V>> {
+        let size = mem::size_of::<V>().checked_mul(capacity)?;
+        let layout = Layout::from_size_align(size, mem::align_of::<V>()).ok()?;
+
+        let uninit = if layout.size() == 0 {
+            Uninit::empty()
+        } else {
+            self.get_layout(layout)?
+                .uninit
+                .cast_slice()
+                .unwrap()
+        };
+
+        Some(FixedVec::new(uninit))
+    }
+
     /// Allocate an [`Rc`].
     ///
-    /// This will allocate some memory with the correct layout for an `Rc`, then place the provided
-    /// value into the allocation by constructing an `Rc`.
+    /// This will allocate some memory with the correct layout for an [`Rc`], then place the
+    /// provided value into the allocation by constructing an [`Rc`].
     ///
     /// [`Rc`]: ../rc/struct.Rc.html
     pub fn rc<V>(&self, val: V) -> Option<Rc<'_, V>> {
