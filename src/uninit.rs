@@ -326,6 +326,18 @@ impl<'a, T> Uninit<'a, [T]> {
         })
     }
 
+    /// Create an initializable pointer to the inner bytes of a `MaybeUninit`.
+    pub fn from_maybe_uninit(mem: &'a mut [mem::MaybeUninit<T>]) -> Self {
+        let ptr = ptr::NonNull::new(mem.as_mut_ptr()).unwrap();
+        let raw = unsafe {
+            // SAFETY:
+            // * unaliased as we had a mutable reference
+            // * can write uninitialized bytes as much as we want
+            Uninit::from_memory(ptr.cast(), mem::size_of_val(mem))
+        };
+        raw.cast_slice().unwrap()
+    }
+
     /// Get the pointer to the first element of the slice.
     ///
     /// If the slice would be empty then the pointer may be the past-the-end pointer as well.
@@ -711,7 +723,13 @@ impl<'a, T: ?Sized> UninitView<'a, T> {
 
 impl<'a, T> From<&'a mut mem::MaybeUninit<T>> for Uninit<'a, T> {
     fn from(mem: &'a mut mem::MaybeUninit<T>) -> Self {
-        Uninit::from_maybe_uninit(mem)
+        Uninit::<T>::from_maybe_uninit(mem)
+    }
+}
+
+impl<'a, T> From<&'a mut [mem::MaybeUninit<T>]> for Uninit<'a, [T]> {
+    fn from(mem: &'a mut [mem::MaybeUninit<T>]) -> Self {
+        Uninit::<[T]>::from_maybe_uninit(mem)
     }
 }
 

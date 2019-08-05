@@ -15,6 +15,13 @@ fn create() {
     assert!(vec.is_empty());
     assert_eq!(vec.capacity(), 16);
 
+    let mut memory: [MaybeUninit<u8>; 16] = [MaybeUninit::uninit(); 16];
+    let uninit = Uninit::from(&mut memory[..]);
+    let vec = FixedVec::new(uninit);
+    assert_eq!(vec.len(), 0);
+    assert!(vec.is_empty());
+    assert_eq!(vec.capacity(), 16);
+
     // This should be exactly enough to fulfill the request.
     let slab: Slab<[usize; 16]> = Slab::uninit();
     let vec = slab.fixed_vec::<usize>(16).unwrap();
