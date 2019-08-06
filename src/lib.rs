@@ -24,11 +24,11 @@
 //! `FixedVec` without forced `Clone` or `Copy` semantics:
 //!
 //! ```rust
-//! use static_alloc::{FixedVec, Uninit};
-//! use core::mem::MaybeUninit;
+//! use static_alloc::{FixedVec, Slab};
 //!
-//! let mut pool: MaybeUninit<[u8; 1024]> = MaybeUninit::uninit();
-//! let mut vector = FixedVec::from_available(Uninit::from(&mut pool));
+//! let mut pool: Slab<[usize; 16]> = Slab::uninit();
+//! // Allocate a vector with capacity of 16 from the slab.
+//! let mut vector = pool.fixed_vec(16).unwrap();
 //!
 //! let mut num = 0;
 //! // Push a mutable reference, not `Copy` nor `Clone`!

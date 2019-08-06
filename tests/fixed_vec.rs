@@ -32,9 +32,9 @@ fn create() {
 
 #[test]
 fn indexing() {
-    let mut memory: MaybeUninit<[u8; 16]> = MaybeUninit::uninit();
-    let uninit = Uninit::from(&mut memory).cast_slice().unwrap();
-    let mut vec = FixedVec::<u8>::new(uninit);
+    let mut memory: [MaybeUninit<u8>; 16] = [MaybeUninit::uninit(); 16];
+    let uninit = Uninit::from(&mut memory[..]);
+    let mut vec = FixedVec::new(uninit);
 
     assert_eq!(&vec[..], []);
     vec.push(0).unwrap();
