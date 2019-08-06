@@ -266,6 +266,51 @@ impl<T> FixedVec<'_, T> {
         Some(val)
     }
 
+    /// Split the capacity into a *borrowed* other vector.
+    ///
+    /// The other vector borrows the underlying memory resource while it is alive.
+    ///
+    /// This is a specialized method not found in the standard `Vec` as it relies on `FixedVec` not
+    /// owning the allocation itself. This avoids splitting the underlying allocation which would
+    /// require `unsafe` to mend the parts together.
+    ///
+    /// ## Panics
+    /// This method panics if `at > self.capacity()`.
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use static_alloc::{FixedVec, Slab};
+    ///
+    /// let mut memory: Slab<[usize; 8]> = Slab::uninit();
+    /// let mut vec = memory.fixed_vec::<usize>(8).unwrap();
+    /// vec.fill(0..7);
+    ///
+    /// // Can use like a vector:
+    /// let mut part = vec.split_borrowed(4);
+    /// assert!(part.push(7).is_ok());
+    /// assert!((4..8).eq(part.drain(..)));
+    ///
+    /// // Drop to rescind the borrow on `vec`.
+    /// drop(part);
+    ///
+    /// // All split elements are gone
+    /// assert_eq!(vec.len(), 4);
+    /// // But retained all capacity
+    /// assert_eq!(vec.capacity(), 8);
+    /// ```
+    #[must_use = "Elements in the split tail will be dropped. Prefer `truncate(at)` or `drain(at..)` if there is no other use."]
+    pub fn split_borrowed(&mut self, at: usize) -> FixedVec<'_, T> {
+        assert!(at <= self.capacity(), "`at` out of bounds");
+        let new_uninit = self.uninit.borrow_mut().split_at(at).unwrap();
+        let new_len = self.length.saturating_sub(at);
+        self.length -= new_len;
+        FixedVec {
+            uninit: new_uninit,
+            length: new_len,
+        }
+    }
+
     /// Split the capacity of the collection into two at a given index.
     ///
     /// In contrast to `Vec::split_off` calling this method reduces the capacity of `self` to `at`.
@@ -278,7 +323,7 @@ impl<T> FixedVec<'_, T> {
         let new_uninit = self.uninit.split_at(at).unwrap();
         // The first `at` elements stay in this vec.
         let new_len = self.length.saturating_sub(at);
-        self.length = self.length - new_len;
+        self.length -= new_len;
         FixedVec {
             uninit: new_uninit,
             length: new_len,
