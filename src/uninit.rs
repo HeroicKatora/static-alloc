@@ -4,7 +4,7 @@
 //! not 'used' in any particular manner. See [the discussion of the unsafe working group][wg-ref].
 //!
 //! [wg-ref]: https://github.com/rust-lang/unsafe-code-guidelines/issues/77
-use core::{fmt, mem, ptr};
+use core::{fmt, mem, slice, ptr};
 use core::alloc::Layout;
 use core::marker::PhantomData;
 
@@ -294,6 +294,20 @@ impl<'a, T> Uninit<'a, T> {
         &mut *self.as_ptr()
     }
 
+    /// Turn this into a reference to standard `MaybeUninit`.
+    ///
+    /// This is mainly useful for interfacing with other consumers which expect standard library
+    /// types. It may also improve ergonomics for writing to the pointee partially initialized
+    /// instances of `T` that are obtained via other means.
+    ///
+    /// Note that the sequence `from_maybe_uninit`, `into_maybe_uninit` is a no-op. The converse is
+    /// however not the case, as it will potentially discard unused padding present in the original
+    /// `Uninit`.
+    pub fn into_maybe_uninit(self) -> &'a mut mem::MaybeUninit<T> {
+        // SAFETY: MaybeUninit is a transparent wrapper and need not be initialized.
+        unsafe { &mut*(self.as_ptr() as *mut mem::MaybeUninit<T>) }
+    }
+
     /// Utilize this `Uninit` allocation for a boxed value.
     ///
     /// Stores the value at the pointed-to location and utilizes the `Box` as a RAII-guard to
@@ -377,6 +391,24 @@ impl<'a, T> Uninit<'a, [T]> {
         let part = self.split_at(split)?;
         // If it is a valid slice of length 1 it is a valid `T`.
         Some(Uninit::decast(part).cast().unwrap())
+    }
+
+    /// Turn this into a slice of standard `MaybeUninit`s.
+    ///
+    /// This is mainly useful for interfacing with other consumers which expect standard library
+    /// types. It may also improve ergonomics for writing to the pointee partially initialized
+    /// instances of `T` that are obtained via other means.
+    ///
+    /// Note that the sequence `from_maybe_uninit_slice`, `into_maybe_uninit_slice` is a no-op. The
+    /// converse is however not the case, as it will potentially discard unused padding present in
+    /// the original `Uninit`.
+    pub fn into_maybe_uninit_slice(self) -> &'a mut [mem::MaybeUninit<T>] {
+        unsafe {
+            // SAFETY: MaybeUninit is a transparent wrapper and need not be initialized.
+            slice::from_raw_parts_mut(
+                self.as_begin_ptr() as *mut mem::MaybeUninit<T>,
+                self.capacity())
+        }
     }
 }
 
@@ -608,6 +640,19 @@ impl<'a, T> UninitView<'a, T> {
     pub unsafe fn into_ref(self) -> &'a T {
         &*self.as_ptr()
     }
+
+    /// Turn this into a reference to standard `MaybeUninit`.
+    ///
+    /// This is mainly useful for interfacing with other consumers which expect standard library
+    /// types and to mirror `Uninit`.
+    ///
+    /// Note that the sequence `from_maybe_uninit`, `into_maybe_uninit` is a no-op. The converse is
+    /// however not the case, as it will potentially discard unused padding present in the original
+    /// `Uninit`.
+    pub fn into_maybe_uninit(self) -> &'a mem::MaybeUninit<T> {
+        // SAFETY: MaybeUninit is a transparent wrapper and need not be initialized.
+        unsafe { &*(self.as_ptr() as *const mem::MaybeUninit<T>) }
+    }
 }
 
 impl<'a, T> UninitView<'a, [T]> {
@@ -686,6 +731,23 @@ impl<'a, T> UninitView<'a, [T]> {
         let part = self.split_at(split)?;
         // If it is a valid slice of length 1 it is a valid `T`.
         Some(UninitView::decast(part).cast().unwrap())
+    }
+
+    /// Turn this into a slice of standard `MaybeUninit`s.
+    ///
+    /// This is mainly useful for interfacing with other consumers which expect standard library
+    /// types and to mirror `Uninit`.
+    ///
+    /// Note that the sequence `from_maybe_uninit_slice`, `into_maybe_uninit_slice` is a no-op. The
+    /// converse is however not the case, as it will potentially discard unused padding present in
+    /// the original `Uninit`.
+    pub fn into_maybe_uninit_slice(self) -> &'a [mem::MaybeUninit<T>] {
+        unsafe {
+            // SAFETY: MaybeUninit is a transparent wrapper and need not be initialized.
+            slice::from_raw_parts(
+                self.as_begin_ptr() as *const mem::MaybeUninit<T>,
+                self.capacity())
+        }
     }
 }
 
