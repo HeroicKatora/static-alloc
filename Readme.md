@@ -65,12 +65,11 @@ let two = SLAB.boxed(List::Cons(1, one)).unwrap();
 As local memory pools for fixed capacity `FixedVec`:
 
 ```rust
-use static_alloc::{FixedVec, Uninit};
-use core::mem::MaybeUninit;
+use static_alloc::{FixedVec, Slab};
 
-let mut pool = MaybeUninit::<[u8; 1024]>::uninit();
-let memory = Uninit::from(&mut pool);
-let mut vector = FixedVec::from_available(memory);
+let mut pool: Slab<[usize; 16]> = Slab::uninit();
+// Allocate a vector with capacity of 16 from the slab.
+let mut vector = pool.fixed_vec(16).unwrap();
 
 let mut num = 0;
 // Push mutable ref, not `'static`, `Copy` nor `Clone`!

@@ -14,7 +14,27 @@ use crate::uninit::Uninit;
 ///
 /// # Basic Usage
 ///
-/// # Advanaced Usage
+/// It is easy to use a local array or slice of `MaybeUninit` for the storage of a `FixedVec`. Note
+/// that, similar to the allocated standard `Vec`, the underlying memory not being stored inline
+/// makes moves and splitting much cheaper.
+///
+/// ```
+/// use core::mem::MaybeUninit;
+/// use static_alloc::FixedVec;
+///
+/// let mut memory: [MaybeUninit<usize>; 15] = [MaybeUninit::uninit(); 15];
+/// let mut stack = FixedVec::new((&mut memory[..]).into());
+///
+/// stack.push(1);
+/// stack.push(2);
+/// stack.push(3);
+/// while let Some(top) = stack.pop() {
+///     // Prints 3, 2, 1
+///     println!("{}", top);
+/// }
+/// ```
+///
+/// ## With `Slab`
 ///
 /// One focus of the library is composability. It should not be surprising that `FixedVec`
 /// interacts with the [`Slab`] allocator, which implements a specialized interface providing the
@@ -22,27 +42,73 @@ use crate::uninit::Uninit;
 /// own local stack variables.
 ///
 /// ```
-/// # use static_alloc::{FixedVec, Slab};
-/// # use core::alloc::Layout;
+/// use static_alloc::{FixedVec, Slab};
+///
 /// let alloc: Slab<[u8; 1 << 12]> = Slab::uninit();
 /// let some_usize = alloc.leak(0_usize).unwrap();
 ///
-/// let mut vec: FixedVec<&usize> = FixedVec::from_available(
-///     alloc.get_layout(Layout::new::<[&usize; 1]>()).unwrap().uninit);
+/// // Allocate a vector with capacity `1` from the slab.
+/// let mut vec = alloc.fixed_vec(1).unwrap();
+///
 /// // Push the reference to the other allocation.
-/// vec.push(some_usize);
+/// vec.push(&mut *some_usize);
 ///
 /// // … do something else
 ///
 /// // Ensure lifetimes work out.
 /// drop(vec);
+///
+/// // Hooray, now once again unborrowed.
+/// *some_usize = 0;
+/// ```
+///
+/// ## The [`from_unaligned`] constructor
+///
+/// It is possible to place a `FixedVec` into an uninitialized memory, not only the `Uninit<[T]>`
+/// that the [`new`] constructor requires. This will align the underlying memory suitably and
+/// substitute a dangling empty slice if that is not possible.
+///
+/// ```
+/// use core::mem::MaybeUninit;
+/// use static_alloc::{FixedVec, Uninit};
+///
+/// struct MyStruct {
+///     // ..
+/// # _private: [usize; 1],
+/// }
+///
+/// let mut memory: MaybeUninit<[u8; 1024]> = MaybeUninit::uninit();
+/// let uninit = Uninit::from(&mut memory);
+///
+/// // NO guarantees about space lost from required additional aligning.
+/// let mut vec: FixedVec<MyStruct> = FixedVec::from_unaligned(uninit);
 /// ```
 ///
 /// [`Slab`]: ../slab/struct.Slab.html
 /// [`Uninit`]: ../uninit/struct.Uninit.html
+/// [`new`]: #method.new
+/// [`from_unaligned`]: #method.from_unaligned
 pub struct FixedVec<'a, T> {
     uninit: Uninit<'a, [T]>,
     length: usize,
+}
+
+/// An iterator removing a range of elements from a `FixedVec`.
+///
+/// See [`FixedVec::drain`] for more information.
+///
+/// [`FixedVec::drain`]: struct.FixedVec.html#method.drain
+pub struct Drain<'a, T> {
+    /// Number of elements drained.
+    count: usize,
+    /// The start of the tail (relative to `elements`), inbounds offset for `elements`.
+    tail: usize,
+    /// The length of the tail.
+    tail_len: usize,
+    /// Pointer to first element to drain (and to write to on `Drop`).
+    elements: ptr::NonNull<T>,
+    /// The length field of the underlying `FixedVec`.
+    len: &'a mut usize,
 }
 
 impl<T> FixedVec<'_, T> {
@@ -50,8 +116,11 @@ impl<T> FixedVec<'_, T> {
     ///
     /// If the length is not larger than `len` this has no effect.
     ///
-    /// The tail of the vector is dropped starting from the last element. This is opposite to
-    /// ([WIP] interface does not yet exist) `.drain(len..).for_each(drop)`.
+    /// The tail of the vector is dropped starting from the last element. This order is opposite to
+    /// `.drain(len..).for_each(drop)`. `truncate` provides the extra guarantee that a `panic`
+    /// during `Drop` of one element effectively stops the truncation at that point, instead of
+    /// leaking unspecified other content of the vector. This means that other elements are still
+    /// dropped when unwinding eventually drops the `FixedVec` itself.
     ///
     /// ## Example
     ///
@@ -59,9 +128,8 @@ impl<T> FixedVec<'_, T> {
     /// # use core::mem::MaybeUninit;
     /// # use static_alloc::{FixedVec, Uninit};
     ///
-    /// let mut memory: MaybeUninit<[usize; 4]> = MaybeUninit::uninit();
-    /// let uninit = Uninit::from(&mut memory).cast_slice().unwrap();
-    /// let mut vec = FixedVec::new(uninit);
+    /// let mut memory: [MaybeUninit<usize>; 4] = [MaybeUninit::uninit(); 4];
+    /// let mut vec = FixedVec::new(Uninit::from(&mut memory[..]));
     ///
     /// vec.push(0usize);
     /// vec.push(1usize);
@@ -157,9 +225,8 @@ impl<T> FixedVec<'_, T> {
     /// use core::mem::MaybeUninit;
     ///
     /// // Only enough storage for one element.
-    /// let mut allocation: MaybeUninit<[u32; 1]> = MaybeUninit::uninit();
-    /// let uninit = Uninit::from_maybe_uninit(&mut allocation);
-    /// let mut vec = FixedVec::from_available(uninit);
+    /// let mut allocation: [MaybeUninit<u32>; 1] = [MaybeUninit::uninit()];
+    /// let mut vec = FixedVec::new(Uninit::from(&mut allocation[..]));
     ///
     /// // First push succeeds.
     /// assert_eq!(vec.push(1), Ok(()));
@@ -199,6 +266,51 @@ impl<T> FixedVec<'_, T> {
         Some(val)
     }
 
+    /// Split the capacity into a *borrowed* other vector.
+    ///
+    /// The other vector borrows the underlying memory resource while it is alive.
+    ///
+    /// This is a specialized method not found in the standard `Vec` as it relies on `FixedVec` not
+    /// owning the allocation itself. This avoids splitting the underlying allocation which would
+    /// require `unsafe` to mend the parts together.
+    ///
+    /// ## Panics
+    /// This method panics if `at > self.capacity()`.
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use static_alloc::{FixedVec, Slab};
+    ///
+    /// let mut memory: Slab<[usize; 8]> = Slab::uninit();
+    /// let mut vec = memory.fixed_vec::<usize>(8).unwrap();
+    /// vec.fill(0..7);
+    ///
+    /// // Can use like a vector:
+    /// let mut part = vec.split_borrowed(4);
+    /// assert!(part.push(7).is_ok());
+    /// assert!((4..8).eq(part.drain(..)));
+    ///
+    /// // Drop to rescind the borrow on `vec`.
+    /// drop(part);
+    ///
+    /// // All split elements are gone
+    /// assert_eq!(vec.len(), 4);
+    /// // But retained all capacity
+    /// assert_eq!(vec.capacity(), 8);
+    /// ```
+    #[must_use = "Elements in the split tail will be dropped. Prefer `truncate(at)` or `drain(at..)` if there is no other use."]
+    pub fn split_borrowed(&mut self, at: usize) -> FixedVec<'_, T> {
+        assert!(at <= self.capacity(), "`at` out of bounds");
+        let new_uninit = self.uninit.borrow_mut().split_at(at).unwrap();
+        let new_len = self.length.saturating_sub(at);
+        self.length -= new_len;
+        FixedVec {
+            uninit: new_uninit,
+            length: new_len,
+        }
+    }
+
     /// Split the capacity of the collection into two at a given index.
     ///
     /// In contrast to `Vec::split_off` calling this method reduces the capacity of `self` to `at`.
@@ -211,7 +323,7 @@ impl<T> FixedVec<'_, T> {
         let new_uninit = self.uninit.split_at(at).unwrap();
         // The first `at` elements stay in this vec.
         let new_len = self.length.saturating_sub(at);
-        self.length = self.length - new_len;
+        self.length -= new_len;
         FixedVec {
             uninit: new_uninit,
             length: new_len,
@@ -233,6 +345,54 @@ impl<T> FixedVec<'_, T> {
             }
         }
         iter
+    }
+
+    /// Creates a draining iterator that yields and removes elements a given range.
+    ///
+    /// It is unspecified which elements are removed if the `Drain` is never dropped. If you
+    /// require precise semantics even in this case you might be able to swap the range to the back
+    /// of the vector and invoke [`split_and_shrink_to`].
+    ///
+    /// [`split_and_shrink_to`]: #method.split_and_shrink_to
+    pub fn drain<R>(&mut self, range: R) -> Drain<'_, T>
+        where R: ops::RangeBounds<usize>
+    {
+        let len = self.len();
+        let start = match range.start_bound() {
+            ops::Bound::Included(&n) => n,
+            ops::Bound::Excluded(&n) => n + 1,
+            ops::Bound::Unbounded    => 0,
+        };
+        let end = match range.end_bound() {
+            ops::Bound::Included(&n) => n + 1,
+            ops::Bound::Excluded(&n) => n,
+            ops::Bound::Unbounded    => len,
+        };
+        assert!(start <= end);
+        assert!(end <= len);
+
+        let elements = unsafe {
+            // SAFETY: 
+            //  Within allocation since `start <= len` and len is at most the
+            //  one-past-the-end pointer. Pointer within are also never null.
+            //
+            //  In particular we can shorten the length. We initially shorten
+            //  the length until all elements are drained. The Drain will
+            //  increase the length by `len - end` elements which will still be
+            //  within the bounds of the allocation as `start <= end`.
+            self.set_len(start);
+            ptr::NonNull::new_unchecked(self.as_mut_ptr().add(start))
+        };
+
+        Drain {
+            // Internal invariant: `count <= tail`.
+            count: 0,
+            // Relative to `elements`. inbounds of original `as_mut_ptr()`.
+            tail: end - start,
+            tail_len: len - end,
+            elements,
+            len: &mut self.length,
+        }
     }
 
     fn head_tail_mut(&mut self) -> (Uninit<'_, [T]>, Uninit<'_, [T]>) {
@@ -264,8 +424,12 @@ impl<'a, T> FixedVec<'a, T> {
     /// When no aligned slice can be create within the provided memory then the constructor will
     /// fallback to an empty dangling slice.
     ///
-    /// This is only a utility function.
-    pub fn from_available<U>(generic: Uninit<'a, U>) -> Self {
+    /// This is only a utility function which may be lossy as data before the alignment is
+    /// discarded. Prefer an explicit [`Uninit::cast_slice`] followed by error handling if this is
+    /// undesirable.
+    ///
+    /// [`Uninit::cast_slice`]: ../uninit/struct.Uninit.html#method.cast_slice
+    pub fn from_unaligned<U: ?Sized>(generic: Uninit<'a, U>) -> Self {
         let mut uninit = generic.as_memory();
         let slice = uninit.split_slice().unwrap_or_else(Uninit::empty);
         Self::new(slice)
@@ -276,6 +440,35 @@ impl<'a, T> FixedVec<'a, T> {
     /// This operation is idempotent.
     pub fn shrink_to_fit(&mut self) -> Uninit<'a, ()> {
         self.uninit.shrink_to_fit()
+    }
+}
+
+impl<T> Drain<'_, T> {
+    /// View the remaining data as a slice.
+    ///
+    /// Similar to `slice::Iter::as_slice` but you are not allowed to use the iterator as it will
+    /// invalidate the pointees. This is an extended form of `Peekable::peek`.
+    pub fn as_slice(&self) -> &[T] {
+        unsafe {
+            // SAFETY: all indices up to `tail` are inbounds. Internal invariant guarantees `count`
+            // is smaller.
+            slice::from_raw_parts(
+                self.elements.as_ptr().add(self.count),
+                self.tail - self.count)
+        }
+    }
+
+    /// View the remaining data as a mutable slice.
+    ///
+    /// This is `Peekable::peek` on steroids.
+    pub fn as_mut_slice(&mut self) -> &mut [T] {
+        unsafe {
+            // SAFETY: all indices up to `tail` are inbounds. Internal invariant guarantees `count`
+            // is smaller. Not aliased as it mutably borrows the `Drain`.
+            slice::from_raw_parts_mut(
+                self.elements.as_ptr().add(self.count),
+                self.tail - self.count)
+        }
     }
 }
 
@@ -391,6 +584,43 @@ impl<T> AsMut<[T]> for FixedVec<'_, T> {
     }
 }
 
+impl<T> Iterator for Drain<'_, T> {
+    type Item = T;
+
+    fn next(&mut self) -> Option<T> {
+        if self.count == self.tail {
+            return None;
+        }
+
+        let t = unsafe {
+            // SAFETY: `count <= self.tail` and `tail` is always in bounds.
+            ptr::read(self.elements.as_ptr().add(self.count))
+        };
+
+        self.count += 1;
+        Some(t)
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (self.count..self.tail).size_hint()
+    }
+}
+
+impl<T> Drop for Drain<'_, T> {
+    fn drop(&mut self) {
+        self.for_each(drop);
+
+        if self.tail_len != 0 {
+            unsafe {
+                let source = self.elements.as_ptr().add(self.tail);
+                ptr::copy(source, self.elements.as_ptr(), self.tail_len);
+            }
+            // Restore the tail to the vector.
+            *self.len += self.tail_len;
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::FixedVec;
@@ -401,13 +631,13 @@ mod tests {
 
     #[test]
     fn init_and_use() {
-        #[derive(Debug, PartialEq, Eq)]
+        #[derive(Clone, Copy, Debug, PartialEq, Eq)]
         struct Foo(usize);
 
         const CAPACITY: usize = 30;
 
-        let mut allocation: MaybeUninit<[Foo; CAPACITY]> = MaybeUninit::uninit();
-        let mut vec = FixedVec::from_available((&mut allocation).into());
+        let mut allocation: [MaybeUninit<Foo>; 30] = [MaybeUninit::uninit(); 30];
+        let mut vec = FixedVec::new((&mut allocation[..]).into());
 
         assert_eq!(vec.capacity(), CAPACITY);
         assert_eq!(vec.len(), 0);
@@ -440,7 +670,8 @@ mod tests {
 
 
         let mut allocation: MaybeUninit<[HasDrop; COUNT]> = MaybeUninit::uninit();
-        let mut vec = FixedVec::from_available((&mut allocation).into());
+        let uninit = Uninit::from_maybe_uninit(&mut allocation);
+        let mut vec = FixedVec::new(uninit.cast_slice().unwrap());
 
         for i in 0..COUNT {
             assert!(vec.push(HasDrop(i)).is_ok());
@@ -465,7 +696,7 @@ mod tests {
         let mut aligned = Uninit::from(&mut allocation).as_memory();
         let _ = aligned.split_at_byte(15);
 
-        let mut vec = FixedVec::from_available(aligned);
+        let mut vec = FixedVec::new(aligned.cast_slice().unwrap());
         let mut second = vec.split_and_shrink_to(4);
         let tail = second.shrink_to_fit();
 
@@ -538,7 +769,7 @@ mod tests {
             }
         }
 
-        let mut allocation: MaybeUninit<[u8; 512]> = MaybeUninit::zeroed();
+        let mut allocation: MaybeUninit<[Trigger<'static>; 3]> = MaybeUninit::zeroed();
         let drops = Cell::new(0);
 
         // Is `Drop`ed *after* the Vec, and will record the number of usually dropped Triggers.
@@ -548,7 +779,7 @@ mod tests {
         };
 
         let uninit = Uninit::from(&mut allocation).as_memory();
-        let mut vec = FixedVec::from_available(uninit);
+        let mut vec = FixedVec::new(uninit.cast_slice().unwrap());
 
         vec.push(Trigger { panic_on_drop: false, dropped_counter: &drops }).unwrap();
         // This one is within the truncated tail but is not dropped until unwind as truncate

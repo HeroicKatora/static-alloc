@@ -15,6 +15,13 @@ fn create() {
     assert!(vec.is_empty());
     assert_eq!(vec.capacity(), 16);
 
+    let mut memory: [MaybeUninit<u8>; 16] = [MaybeUninit::uninit(); 16];
+    let uninit = Uninit::from(&mut memory[..]);
+    let vec = FixedVec::new(uninit);
+    assert_eq!(vec.len(), 0);
+    assert!(vec.is_empty());
+    assert_eq!(vec.capacity(), 16);
+
     // This should be exactly enough to fulfill the request.
     let slab: Slab<[usize; 16]> = Slab::uninit();
     let vec = slab.fixed_vec::<usize>(16).unwrap();
@@ -25,9 +32,9 @@ fn create() {
 
 #[test]
 fn indexing() {
-    let mut memory: MaybeUninit<[u8; 16]> = MaybeUninit::uninit();
-    let uninit = Uninit::from(&mut memory).cast_slice().unwrap();
-    let mut vec = FixedVec::<u8>::new(uninit);
+    let mut memory: [MaybeUninit<u8>; 16] = [MaybeUninit::uninit(); 16];
+    let uninit = Uninit::from(&mut memory[..]);
+    let mut vec = FixedVec::new(uninit);
 
     assert_eq!(&vec[..], []);
     vec.push(0).unwrap();
@@ -115,6 +122,22 @@ fn truncations() {
     assert_eq!(drops.get(), 16);
     vec.clear();
     assert_eq!(drops.get(), 16);
+}
+
+#[test]
+fn drain() {
+    const COUNT: usize = 16;
+    let mut memory: [MaybeUninit<usize>; COUNT] = [MaybeUninit::uninit(); COUNT];
+    let mut vec = FixedVec::new((&mut memory[..]).into());
+
+    assert_eq!(vec.fill(0..COUNT).len(), 0);
+    let mut drain = vec.drain(..8);
+    assert_eq!(drain.as_slice(), [0, 1, 2, 3, 4, 5, 6, 7]);
+    drain.as_mut_slice()[0] = 0xFF;
+    assert_eq!(drain.next(), Some(0xFF));
+    assert!((1..8).eq(&mut drain));
+    drop(drain);
+    assert!((8..COUNT).eq(vec.iter().copied()));
 }
 
 #[test]
