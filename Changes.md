@@ -1,3 +1,11 @@
+## v0.1.0
+
+- Added `Uninit::from_maybe_uninit_slice`, slice variant of `from_maybe_uninit`.
+- Added `Uninit::into_maybe_uninit` as the inverse of the constructor.
+- Added `FixedVec::drain` and `Drain`: work just like the standard ones.
+- Renamed `FixedVec::from_available` to `FixedVec::from_unaligned`
+- Added `FixedVec::split_borrowed` to split without affecting capacity.
+
 ## v0.0.7
 
 - Introduces `Rc`, a reference counter owned value.
