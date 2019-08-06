@@ -131,7 +131,12 @@ fn drain() {
     let mut vec = FixedVec::new((&mut memory[..]).into());
 
     assert_eq!(vec.fill(0..COUNT).len(), 0);
-    assert!((0..8).eq(vec.drain(..8)));
+    let mut drain = vec.drain(..8);
+    assert_eq!(drain.as_slice(), [0, 1, 2, 3, 4, 5, 6, 7]);
+    drain.as_mut_slice()[0] = 0xFF;
+    assert_eq!(drain.next(), Some(0xFF));
+    assert!((1..8).eq(&mut drain));
+    drop(drain);
     assert!((8..COUNT).eq(vec.iter().copied()));
 }
 

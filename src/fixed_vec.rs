@@ -99,13 +99,13 @@ pub struct FixedVec<'a, T> {
 ///
 /// [`FixedVec::drain`]: struct.FixedVec.html#method.drain
 pub struct Drain<'a, T> {
-    /// Number of elements to drain.
+    /// Number of elements drained.
     count: usize,
-    /// The start of the tail.
+    /// The start of the tail (relative to `elements`), inbounds offset for `elements`.
     tail: usize,
     /// The length of the tail.
     tail_len: usize,
-    /// Pointer to first element to drain (and to write on `Drop`).
+    /// Pointer to first element to drain (and to write to on `Drop`).
     elements: ptr::NonNull<T>,
     /// The length field of the underlying `FixedVec`.
     len: &'a mut usize,
@@ -385,7 +385,9 @@ impl<T> FixedVec<'_, T> {
         };
 
         Drain {
+            // Internal invariant: `count <= tail`.
             count: 0,
+            // Relative to `elements`. inbounds of original `as_mut_ptr()`.
             tail: end - start,
             tail_len: len - end,
             elements,
@@ -438,6 +440,35 @@ impl<'a, T> FixedVec<'a, T> {
     /// This operation is idempotent.
     pub fn shrink_to_fit(&mut self) -> Uninit<'a, ()> {
         self.uninit.shrink_to_fit()
+    }
+}
+
+impl<T> Drain<'_, T> {
+    /// View the remaining data as a slice.
+    ///
+    /// Similar to `slice::Iter::as_slice` but you are not allowed to use the iterator as it will
+    /// invalidate the pointees. This is an extended form of `Peekable::peek`.
+    pub fn as_slice(&self) -> &[T] {
+        unsafe {
+            // SAFETY: all indices up to `tail` are inbounds. Internal invariant guarantees `count`
+            // is smaller.
+            slice::from_raw_parts(
+                self.elements.as_ptr().add(self.count),
+                self.tail - self.count)
+        }
+    }
+
+    /// View the remaining data as a mutable slice.
+    ///
+    /// This is `Peekable::peek` on steroids.
+    pub fn as_mut_slice(&mut self) -> &mut [T] {
+        unsafe {
+            // SAFETY: all indices up to `tail` are inbounds. Internal invariant guarantees `count`
+            // is smaller. Not aliased as it mutably borrows the `Drain`.
+            slice::from_raw_parts_mut(
+                self.elements.as_ptr().add(self.count),
+                self.tail - self.count)
+        }
     }
 }
 
