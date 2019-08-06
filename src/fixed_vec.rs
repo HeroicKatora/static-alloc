@@ -93,13 +93,34 @@ pub struct FixedVec<'a, T> {
     length: usize,
 }
 
+/// An iterator removing a range of elements from a `FixedVec`.
+///
+/// See [`FixedVec::drain`] for more information.
+///
+/// [`FixedVec::drain`]: struct.FixedVec.html#method.drain
+pub struct Drain<'a, T> {
+    /// Number of elements to drain.
+    count: usize,
+    /// The start of the tail.
+    tail: usize,
+    /// The length of the tail.
+    tail_len: usize,
+    /// Pointer to first element to drain (and to write on `Drop`).
+    elements: ptr::NonNull<T>,
+    /// The length field of the underlying `FixedVec`.
+    len: &'a mut usize,
+}
+
 impl<T> FixedVec<'_, T> {
     /// Shorten the vector to a maximum length.
     ///
     /// If the length is not larger than `len` this has no effect.
     ///
-    /// The tail of the vector is dropped starting from the last element. This is opposite to
-    /// ([WIP] interface does not yet exist) `.drain(len..).for_each(drop)`.
+    /// The tail of the vector is dropped starting from the last element. This order is opposite to
+    /// `.drain(len..).for_each(drop)`. `truncate` provides the extra guarantee that a `panic`
+    /// during `Drop` of one element effectively stops the truncation at that point, instead of
+    /// leaking unspecified other content of the vector. This means that other elements are still
+    /// dropped when unwinding eventually drops the `FixedVec` itself.
     ///
     /// ## Example
     ///
@@ -281,6 +302,52 @@ impl<T> FixedVec<'_, T> {
         iter
     }
 
+    /// Creates a draining iterator that yields and removes elements a given range.
+    ///
+    /// It is unspecified which elements are removed if the `Drain` is never dropped. If you
+    /// require precise semantics even in this case you might be able to swap the range to the back
+    /// of the vector and invoke [`split_and_shrink_to`].
+    ///
+    /// [`split_and_shrink_to`]: #method.split_and_shrink_to
+    pub fn drain<R>(&mut self, range: R) -> Drain<'_, T>
+        where R: ops::RangeBounds<usize>
+    {
+        let len = self.len();
+        let start = match range.start_bound() {
+            ops::Bound::Included(&n) => n,
+            ops::Bound::Excluded(&n) => n + 1,
+            ops::Bound::Unbounded    => 0,
+        };
+        let end = match range.end_bound() {
+            ops::Bound::Included(&n) => n + 1,
+            ops::Bound::Excluded(&n) => n,
+            ops::Bound::Unbounded    => len,
+        };
+        assert!(start <= end);
+        assert!(end <= len);
+
+        let elements = unsafe {
+            // SAFETY: 
+            //  Within allocation since `start <= len` and len is at most the
+            //  one-past-the-end pointer. Pointer within are also never null.
+            //
+            //  In particular we can shorten the length. We initially shorten
+            //  the length until all elements are drained. The Drain will
+            //  increase the length by `len - end` elements which will still be
+            //  within the bounds of the allocation as `start <= end`.
+            self.set_len(start);
+            ptr::NonNull::new_unchecked(self.as_mut_ptr().add(start))
+        };
+
+        Drain {
+            count: 0,
+            tail: end - start,
+            tail_len: len - end,
+            elements,
+            len: &mut self.length,
+        }
+    }
+
     fn head_tail_mut(&mut self) -> (Uninit<'_, [T]>, Uninit<'_, [T]>) {
         // Borrow, do not affect the actual allocation by throwing away possible elements.
         let mut all = self.uninit.borrow_mut();
@@ -438,6 +505,43 @@ impl<T> AsRef<[T]> for FixedVec<'_, T> {
 impl<T> AsMut<[T]> for FixedVec<'_, T> {
     fn as_mut(&mut self) -> &mut [T] {
         &mut **self
+    }
+}
+
+impl<T> Iterator for Drain<'_, T> {
+    type Item = T;
+
+    fn next(&mut self) -> Option<T> {
+        if self.count == self.tail {
+            return None;
+        }
+
+        let t = unsafe {
+            // SAFETY: `count <= self.tail` and `tail` is always in bounds.
+            ptr::read(self.elements.as_ptr().add(self.count))
+        };
+
+        self.count += 1;
+        Some(t)
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (self.count..self.tail).size_hint()
+    }
+}
+
+impl<T> Drop for Drain<'_, T> {
+    fn drop(&mut self) {
+        self.for_each(drop);
+
+        if self.tail_len != 0 {
+            unsafe {
+                let source = self.elements.as_ptr().add(self.tail);
+                ptr::copy(source, self.elements.as_ptr(), self.tail_len);
+            }
+            // Restore the tail to the vector.
+            *self.len += self.tail_len;
+        }
     }
 }
 

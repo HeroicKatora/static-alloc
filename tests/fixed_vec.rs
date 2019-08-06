@@ -125,6 +125,17 @@ fn truncations() {
 }
 
 #[test]
+fn drain() {
+    const COUNT: usize = 16;
+    let mut memory: [MaybeUninit<usize>; COUNT] = [MaybeUninit::uninit(); COUNT];
+    let mut vec = FixedVec::new((&mut memory[..]).into());
+
+    assert_eq!(vec.fill(0..COUNT).len(), 0);
+    assert!((0..8).eq(vec.drain(..8)));
+    assert!((8..COUNT).eq(vec.iter().copied()));
+}
+
+#[test]
 fn hashing() {
     use std::collections::HashMap;
     const KEY: &[usize] = &[0, 1, 2, 3];
