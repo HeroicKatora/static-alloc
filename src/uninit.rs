@@ -4,7 +4,7 @@
 //! not 'used' in any particular manner. See [the discussion of the unsafe working group][wg-ref].
 //!
 //! [wg-ref]: https://github.com/rust-lang/unsafe-code-guidelines/issues/77
-use core::{fmt, mem, slice, ptr};
+use core::{fmt, mem, slice, ops, ptr};
 use core::alloc::Layout;
 use core::marker::PhantomData;
 
@@ -100,6 +100,16 @@ pub struct UninitView<'a, T: ?Sized> {
     /// We'll be holding an actual `NonNull<T>` in the future (when dynamically sized pointers to
     /// slices are more ergonomic). For now, just type ourselves.
     typed: PhantomData<*mut T>,
+}
+
+/// Unique pointer to currently initialized uninit.
+///
+/// This is not `Box` as it will not drop values when it is dropped itself but it logically owns
+/// the value while it is alive. This makes it more similar a `&mut T` which can be deinitialized.
+pub struct Init<'a, T: ?Sized> {
+    ptr: *mut T,
+    view: UninitView<'a, T>,
+    phantom: PhantomData<T>,
 }
 
 impl Uninit<'_, ()> {
@@ -292,6 +302,18 @@ impl<'a, T> Uninit<'a, T> {
     /// Turn this into a mutable reference to the content.
     pub unsafe fn into_mut(self) -> &'a mut T {
         &mut *self.as_ptr()
+    }
+
+    /// Get a dereferencable pointer to the region.
+    ///
+    /// Note that this differs from a raw pointer since the lifetime attached to the allocation it
+    /// is not necessarily shortened to the lifetime of the contained type.
+    pub unsafe fn assume_init(self) -> Init<'a, T> {
+        Init {
+            ptr: self.as_non_null().as_ptr(),
+            view: self.view,
+            phantom: PhantomData,
+        }
     }
 
     /// Turn this into a reference to standard `MaybeUninit`.
@@ -795,6 +817,27 @@ impl<'a, T: ?Sized> UninitView<'a, T> {
     }
 }
 
+#[allow(missing_docs)]
+impl<'a, T: ?Sized> Init<'a, T> {
+    pub fn into_ref(self) -> &'a T {
+        unsafe { &*self.ptr }
+    }
+
+    pub fn into_mut(self) -> &'a mut T {
+        unsafe { &mut *self.ptr }
+    }
+}
+
+#[allow(missing_docs)]
+impl<'a, T> Init<'a, T> {
+    pub fn take(self) -> (Uninit<'a, T>, T) {
+        unsafe {
+            let t = ptr::read(self.ptr);
+            (Uninit::from_view(self.view), t)
+        }
+    }
+}
+
 impl<'a, T> From<&'a mut mem::MaybeUninit<T>> for Uninit<'a, T> {
     fn from(mem: &'a mut mem::MaybeUninit<T>) -> Self {
         Uninit::<T>::from_maybe_uninit(mem)
@@ -862,6 +905,25 @@ impl<T: ?Sized> Clone for UninitView<'_, T> {
 }
 
 impl<T: ?Sized> Copy for UninitView<'_, T> { }
+
+impl<T: ?Sized> ops::Deref for Init<'_, T> {
+    type Target = T;
+    fn deref(&self) -> &T {
+        unsafe { &*self.ptr }
+    }
+}
+
+impl<T: ?Sized> ops::DerefMut for Init<'_, T> {
+    fn deref_mut(&mut self) -> &mut T {
+        unsafe { &mut*self.ptr }
+    }
+}
+
+// We *OWN* the `T` in the container.
+unsafe impl<T: ?Sized + Send> Send for Init<'_, T> { }
+
+// We *OWN* the `T` in the container.
+unsafe impl<T: ?Sized + Sync> Sync for Init<'_, T> { }
 
 #[cfg(test)]
 mod tests {
