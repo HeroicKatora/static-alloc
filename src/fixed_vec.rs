@@ -262,6 +262,7 @@ impl<T> FixedVec<'_, T> {
             // SAFETY: initialized and no reference of any kind exists to it.
             ptr::read(last.as_ptr())
         };
+
         self.length -= 1;
         Some(val)
     }
@@ -340,8 +341,14 @@ impl<T> FixedVec<'_, T> {
         let mut iter = iter.into_iter();
         for item in iter.by_ref().take(unused) {
             unsafe {
-                *self.end_mut_ptr() = item;
-                self.set_len(self.length + 1);
+                // SAFETY: 
+                //  `capacity != len` so this is strictly in bounds. Also, this is behind the
+                //  vector so there can not be any references to it currently.
+                ptr::write(self.end_mut_ptr(), item);
+                // SAFETY:
+                //  Just initialized one more element past the end. By the way, this can not
+                //  overflow since the result is at most `self.capacity()`.
+                self.set_len(self.len() + 1);
             }
         }
         iter
@@ -626,8 +633,44 @@ mod tests {
     use super::FixedVec;
     use crate::Uninit;
 
+    use core::cell::Cell;
     use core::mem::MaybeUninit;
     use core::sync::atomic::{AtomicUsize, Ordering};
+
+    #[derive(Debug)]
+    struct Trigger<'a> {
+        panic_on_drop: bool,
+        dropped_counter: &'a Cell<usize>,
+    }
+
+    impl Drop for Trigger<'_> {
+        fn drop(&mut self) {
+            if self.panic_on_drop { panic!("Trigger triggered") }
+            // Record this as a normal drop.
+            self.dropped_counter.set(self.dropped_counter.get() + 1);
+        }
+    }
+
+    struct AbortMismatchedDropCount<'a> {
+        counter: &'a Cell<usize>,
+        expected: usize,
+    }
+
+    impl Drop for AbortMismatchedDropCount<'_> {
+        fn drop(&mut self) {
+            struct ForceDupPanic;
+
+            impl Drop for ForceDupPanic {
+                fn drop(&mut self) { panic!() }
+            }
+
+            if self.expected != self.counter.get() {
+                // For duplicate panic, and thus abort
+                let _x = ForceDupPanic;
+                panic!();
+            }
+        }
+    }
 
     #[test]
     fn init_and_use() {
@@ -732,43 +775,6 @@ mod tests {
     #[test]
     #[should_panic = "Trigger triggered"]
     fn drop_safe_in_truncation() {
-        use core::cell::Cell;
-
-        #[derive(Debug)]
-        struct Trigger<'a> {
-            panic_on_drop: bool,
-            dropped_counter: &'a Cell<usize>,
-        }
-
-        impl Drop for Trigger<'_> {
-            fn drop(&mut self) {
-                if self.panic_on_drop { panic!("Trigger triggered") }
-                // Record this as a normal drop.
-                self.dropped_counter.set(self.dropped_counter.get() + 1);
-            }
-        }
-
-        struct AbortMismatchedDropCount<'a> {
-            counter: &'a Cell<usize>,
-            expected: usize,
-        }
-
-        impl Drop for AbortMismatchedDropCount<'_> {
-            fn drop(&mut self) {
-                struct ForceDupPanic;
-
-                impl Drop for ForceDupPanic {
-                    fn drop(&mut self) { panic!() }
-                }
-
-                if self.expected != self.counter.get() {
-                    // For duplicate panic, and thus abort
-                    let _x = ForceDupPanic;
-                    panic!();
-                }
-            }
-        }
-
         let mut allocation: MaybeUninit<[Trigger<'static>; 3]> = MaybeUninit::zeroed();
         let drops = Cell::new(0);
 
@@ -789,5 +795,26 @@ mod tests {
 
         // Trigger!
         vec.truncate(1);
+    }
+
+    #[test]
+    fn fill_drops() {
+        let mut allocation: MaybeUninit<[Trigger<'static>; 2]> = MaybeUninit::zeroed();
+        let drops = Cell::new(0);
+
+        // Is `Drop`ed *after* the Vec, and will record the number of usually dropped Triggers.
+        let _abort_mismatch_raii = AbortMismatchedDropCount {
+            counter: &drops,
+            expected: 2,
+        };
+
+        let uninit = Uninit::from(&mut allocation).as_memory();
+        let mut vec = FixedVec::new(uninit.cast_slice().unwrap());
+
+        vec.push(Trigger { panic_on_drop: false, dropped_counter: &drops }).unwrap();
+        // This should fill the single remaining slot in the Vec. Only one element is
+        // instantiated.
+        let _ = vec.fill(core::iter::repeat_with(
+            || Trigger { panic_on_drop: false, dropped_counter: &drops }));
     }
 }
