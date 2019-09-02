@@ -1,3 +1,9 @@
+# v0.1.1
+
+- Fixed UB in `FixedVec::fill`. This would drop uninitialized instances while
+  filling the vector, potentially leading to arbitrary code execution.
+  Thanks @danielhenrymantilla for the report.
+
 ## v0.1.0
 
 - Added `Uninit::from_maybe_uninit_slice`, slice variant of `from_maybe_uninit`.
