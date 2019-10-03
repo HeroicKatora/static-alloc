@@ -31,7 +31,6 @@ fn reference_juggling() {
         }
     }
 
-
     let memory: Slab<[u8; 1024]> = Slab::uninit();
     let alloc = memory.get_layout(rc::Rc::<HotPotato>::layout()).unwrap();
     let ptr = alloc.uninit.as_non_null();
@@ -101,6 +100,7 @@ fn downgrade_upgrade() {
 
 #[test]
 fn compares() {
+    use std::cmp::PartialEq;
     let memory: Slab<[u8; 1024]> = Slab::uninit();
 
     let zero = memory.rc(0usize).unwrap();
@@ -108,7 +108,7 @@ fn compares() {
 
     assert_eq!(zero, zero);
     assert_eq!(one, one);
-    assert!(!(zero != zero));
+    assert!(!PartialEq::ne(&zero, &zero));
     assert_ne!(zero, one);
 
     assert!(zero < one);

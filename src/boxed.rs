@@ -244,7 +244,7 @@ mod tests {
         let boxed: Box<'static, _> = SLAB.boxed(&local).unwrap();
         // Check that we can leak with appropriate lifetime.
         let _: & mut _ = Box::leak(boxed);
-
-        drop(local);
+        // local needs to be live for the time before the box is leaked
+        let _ = local;
     }
 }

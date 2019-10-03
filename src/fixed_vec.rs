@@ -99,9 +99,11 @@ pub struct FixedVec<'a, T> {
 ///
 /// [`FixedVec::drain`]: struct.FixedVec.html#method.drain
 pub struct Drain<'a, T> {
-    /// Number of elements drained.
+    /// Number of elements drained from the start of the slice.
     count: usize,
-    /// The start of the tail (relative to `elements`), inbounds offset for `elements`.
+    /// The end of the elements to drain (relative to `elements`), inbounds offset for `elements`.
+    end: usize,
+    /// The start of the tail of elements (relative to `elements`), inbounds offset for `elements`.
     tail: usize,
     /// The length of the tail.
     tail_len: usize,
@@ -334,14 +336,14 @@ impl<T> FixedVec<'_, T> {
     /// Extend the vector with as many elements as fit.
     ///
     /// Returns the iterator with all elements that were not pushed into the vector.
-    pub fn fill<I: IntoIterator<Item=T>>(&mut self, iter: I)
+    pub fn fill<I: IntoIterator<Item = T>>(&mut self, iter: I)
         -> I::IntoIter
     {
         let unused = self.capacity() - self.len();
         let mut iter = iter.into_iter();
         for item in iter.by_ref().take(unused) {
             unsafe {
-                // SAFETY: 
+                // SAFETY:
                 //  `capacity != len` so this is strictly in bounds. Also, this is behind the
                 //  vector so there can not be any references to it currently.
                 ptr::write(self.end_mut_ptr(), item);
@@ -379,7 +381,7 @@ impl<T> FixedVec<'_, T> {
         assert!(end <= len);
 
         let elements = unsafe {
-            // SAFETY: 
+            // SAFETY:
             //  Within allocation since `start <= len` and len is at most the
             //  one-past-the-end pointer. Pointer within are also never null.
             //
@@ -395,6 +397,7 @@ impl<T> FixedVec<'_, T> {
             // Internal invariant: `count <= tail`.
             count: 0,
             // Relative to `elements`. inbounds of original `as_mut_ptr()`.
+            end: end - start,
             tail: end - start,
             tail_len: len - end,
             elements,
@@ -461,7 +464,7 @@ impl<T> Drain<'_, T> {
             // is smaller.
             slice::from_raw_parts(
                 self.elements.as_ptr().add(self.count),
-                self.tail - self.count)
+                self.end - self.count)
         }
     }
 
@@ -474,7 +477,7 @@ impl<T> Drain<'_, T> {
             // is smaller. Not aliased as it mutably borrows the `Drain`.
             slice::from_raw_parts_mut(
                 self.elements.as_ptr().add(self.count),
-                self.tail - self.count)
+                self.end - self.count)
         }
     }
 }
@@ -595,7 +598,7 @@ impl<T> Iterator for Drain<'_, T> {
     type Item = T;
 
     fn next(&mut self) -> Option<T> {
-        if self.count == self.tail {
+        if self.count == self.end {
             return None;
         }
 
@@ -609,7 +612,21 @@ impl<T> Iterator for Drain<'_, T> {
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        (self.count..self.tail).size_hint()
+        (self.count..self.end).size_hint()
+    }
+}
+
+impl<T> DoubleEndedIterator for Drain<'_, T> {
+    fn next_back(&mut self) -> Option<T> {
+        if self.count == self.end {
+            return None;
+        }
+        let t = unsafe {
+            // SAFETY: `end <= self.tail` and `tail` is always in bounds.
+            ptr::read(self.elements.as_ptr().add(self.end - 1))
+        };
+        self.end -= 1;
+        Some(t)
     }
 }
 
@@ -805,7 +822,7 @@ mod tests {
         // Is `Drop`ed *after* the Vec, and will record the number of usually dropped Triggers.
         let _abort_mismatch_raii = AbortMismatchedDropCount {
             counter: &drops,
-            expected: 2,
+            expected: 2
         };
 
         let uninit = Uninit::from(&mut allocation).as_memory();
