@@ -5,7 +5,7 @@
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](https://raw.githubusercontent.com/HeroicKatora/static-alloc/LICENSE)
 [![CI Status](https://api.cirrus-ci.com/github/HeroicKatora/static-alloc.svg)](https://cirrus-ci.com/github/HeroicKatora/static-alloc)
 
-Replacements for `alloc` without dynamic allocation.
+Replacements for `alloc` that do not perform any allocation themselves.
 
 ## Goal and Target Platform
 
