@@ -165,10 +165,13 @@ fn drain_double_ended() {
     assert_eq!(vec.fill(0..COUNT).len(), 0);
     let mut drain = vec.drain(..8);
     assert_eq!(drain.as_slice(), [0, 1, 2, 3, 4, 5, 6, 7]);
+    assert_eq!(drain.len(), 8);
     drain.as_mut_slice()[0] = 0xFF;
     drain.as_mut_slice()[7] = 0xFF;
     assert_eq!(drain.next(), Some(0xFF));
+    assert_eq!(drain.len(), 7);
     assert_eq!(drain.next_back(), Some(0xFF));
+    assert_eq!(drain.len(), 6);
     assert!((1..7).eq(&mut drain));
     drop(drain);
     assert!((8..COUNT).eq(vec.iter().copied()));

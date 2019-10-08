@@ -3,7 +3,7 @@
 //! [See `FixedVec` for the main information][`FixedVec`].
 //!
 //! [`FixedVec`]: struct.FixedVec.html
-use core::{borrow, cmp, hash, ops, ptr, slice};
+use core::{borrow, cmp, hash, iter, ops, ptr, slice};
 use crate::uninit::Uninit;
 
 /// A `Vec`-like structure that does not manage its allocation.
@@ -618,7 +618,7 @@ impl<T> Iterator for Drain<'_, T> {
 
 impl<T> DoubleEndedIterator for Drain<'_, T> {
     fn next_back(&mut self) -> Option<T> {
-        if self.count == self.end {
+        if self.len() == 0 {
             return None;
         }
         let t = unsafe {
@@ -629,6 +629,14 @@ impl<T> DoubleEndedIterator for Drain<'_, T> {
         Some(t)
     }
 }
+
+impl<T> ExactSizeIterator for Drain<'_, T> {
+    fn len(&self) -> usize {
+        self.end - self.count
+    }
+}
+
+impl<T> iter::FusedIterator for Drain<'_, T> { }
 
 impl<T> Drop for Drain<'_, T> {
     fn drop(&mut self) {
