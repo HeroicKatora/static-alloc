@@ -125,7 +125,7 @@ fn truncations() {
 }
 
 #[test]
-fn drain() {
+fn drain_forward() {
     const COUNT: usize = 16;
     let mut memory: [MaybeUninit<usize>; COUNT] = [MaybeUninit::uninit(); COUNT];
     let mut vec = FixedVec::new((&mut memory[..]).into());
@@ -136,6 +136,40 @@ fn drain() {
     drain.as_mut_slice()[0] = 0xFF;
     assert_eq!(drain.next(), Some(0xFF));
     assert!((1..8).eq(&mut drain));
+    drop(drain);
+    assert!((8..COUNT).eq(vec.iter().copied()));
+}
+
+#[test]
+fn drain_reverse() {
+    const COUNT: usize = 16;
+    let mut memory: [MaybeUninit<usize>; COUNT] = [MaybeUninit::uninit(); COUNT];
+    let mut vec = FixedVec::new((&mut memory[..]).into());
+
+    assert_eq!(vec.fill(0..COUNT).len(), 0);
+    let mut drain = vec.drain(..8);
+    assert_eq!(drain.as_slice(), [0, 1, 2, 3, 4, 5, 6, 7]);
+    drain.as_mut_slice()[7] = 0xFF;
+    assert_eq!(drain.next_back(), Some(0xFF));
+    assert!((0..7).eq(&mut drain));
+    drop(drain);
+    assert!((8..COUNT).eq(vec.iter().copied()));
+}
+
+#[test]
+fn drain_double_ended() {
+    const COUNT: usize = 16;
+    let mut memory: [MaybeUninit<usize>; COUNT] = [MaybeUninit::uninit(); COUNT];
+    let mut vec = FixedVec::new((&mut memory[..]).into());
+
+    assert_eq!(vec.fill(0..COUNT).len(), 0);
+    let mut drain = vec.drain(..8);
+    assert_eq!(drain.as_slice(), [0, 1, 2, 3, 4, 5, 6, 7]);
+    drain.as_mut_slice()[0] = 0xFF;
+    drain.as_mut_slice()[7] = 0xFF;
+    assert_eq!(drain.next(), Some(0xFF));
+    assert_eq!(drain.next_back(), Some(0xFF));
+    assert!((1..7).eq(&mut drain));
     drop(drain);
     assert!((8..COUNT).eq(vec.iter().copied()));
 }
