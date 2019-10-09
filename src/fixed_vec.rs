@@ -3,7 +3,7 @@
 //! [See `FixedVec` for the main information][`FixedVec`].
 //!
 //! [`FixedVec`]: struct.FixedVec.html
-use core::{borrow, cmp, hash, ops, ptr, slice};
+use core::{borrow, cmp, hash, iter, ops, ptr, slice};
 use crate::uninit::Uninit;
 
 /// A `Vec`-like structure that does not manage its allocation.
@@ -98,9 +98,10 @@ pub struct FixedVec<'a, T> {
 /// See [`FixedVec::drain`] for more information.
 ///
 /// [`FixedVec::drain`]: struct.FixedVec.html#method.drain
+// Internal invariant: `0 <= start <= end <= tail`
 pub struct Drain<'a, T> {
     /// Number of elements drained from the start of the slice.
-    count: usize,
+    start: usize,
     /// The end of the elements to drain (relative to `elements`), inbounds offset for `elements`.
     end: usize,
     /// The start of the tail of elements (relative to `elements`), inbounds offset for `elements`.
@@ -395,7 +396,7 @@ impl<T> FixedVec<'_, T> {
 
         Drain {
             // Internal invariant: `count <= tail`.
-            count: 0,
+            start: 0,
             // Relative to `elements`. inbounds of original `as_mut_ptr()`.
             end: end - start,
             tail: end - start,
@@ -460,11 +461,11 @@ impl<T> Drain<'_, T> {
     /// invalidate the pointees. This is an extended form of `Peekable::peek`.
     pub fn as_slice(&self) -> &[T] {
         unsafe {
-            // SAFETY: all indices up to `tail` are inbounds. Internal invariant guarantees `count`
+            // SAFETY: all indices up to `tail` are inbounds. Internal invariant guarantees `start`
             // is smaller.
             slice::from_raw_parts(
-                self.elements.as_ptr().add(self.count),
-                self.end - self.count)
+                self.elements.as_ptr().add(self.start),
+                self.len())
         }
     }
 
@@ -473,12 +474,22 @@ impl<T> Drain<'_, T> {
     /// This is `Peekable::peek` on steroids.
     pub fn as_mut_slice(&mut self) -> &mut [T] {
         unsafe {
-            // SAFETY: all indices up to `tail` are inbounds. Internal invariant guarantees `count`
+            // SAFETY: all indices up to `tail` are inbounds. Internal invariant guarantees `start`
             // is smaller. Not aliased as it mutably borrows the `Drain`.
             slice::from_raw_parts_mut(
-                self.elements.as_ptr().add(self.count),
-                self.end - self.count)
+                self.elements.as_ptr().add(self.start),
+                self.len())
         }
+    }
+
+    /// The count of remaining elements to drain.
+    pub fn len(&self) -> usize {
+        self.end - self.start
+    }
+
+    /// If there are any elements remaining.
+    pub fn is_empty(&self) -> bool {
+        self.start == self.end
     }
 }
 
@@ -598,37 +609,47 @@ impl<T> Iterator for Drain<'_, T> {
     type Item = T;
 
     fn next(&mut self) -> Option<T> {
-        if self.count == self.end {
+        if Drain::is_empty(self) {
             return None;
         }
 
         let t = unsafe {
             // SAFETY: `count <= self.tail` and `tail` is always in bounds.
-            ptr::read(self.elements.as_ptr().add(self.count))
+            ptr::read(self.elements.as_ptr().add(self.start))
         };
 
-        self.count += 1;
+        self.start += 1;
         Some(t)
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        (self.count..self.end).size_hint()
+        (self.start..self.end).size_hint()
     }
 }
 
 impl<T> DoubleEndedIterator for Drain<'_, T> {
     fn next_back(&mut self) -> Option<T> {
-        if self.count == self.end {
+        if Drain::is_empty(self) {
             return None;
         }
+
         let t = unsafe {
             // SAFETY: `end <= self.tail` and `tail` is always in bounds.
             ptr::read(self.elements.as_ptr().add(self.end - 1))
         };
+
         self.end -= 1;
         Some(t)
     }
 }
+
+impl<T> ExactSizeIterator for Drain<'_, T> {
+    fn len(&self) -> usize {
+        Drain::len(self)
+    }
+}
+
+impl<T> iter::FusedIterator for Drain<'_, T> { }
 
 impl<T> Drop for Drain<'_, T> {
     fn drop(&mut self) {
@@ -642,6 +663,40 @@ impl<T> Drop for Drain<'_, T> {
             // Restore the tail to the vector.
             *self.len += self.tail_len;
         }
+    }
+}
+
+/// Extend the vector to the extent the allocation allows it.
+///
+/// Appends elements from the iterator until the capacity of the vector is exhausted. Then drops
+/// the remaining iterator **without** iterating through all remaining elements. This allows the
+/// caller to decide the fate or all other elements by passing the iterator by reference.
+///
+/// ## Examples
+///
+/// Some iterators will drain themselves on drop, for example [`Drain`]. This will empty the source
+/// vector even if the target has not enough space.
+///
+/// ```
+/// # use core::mem::MaybeUninit;
+/// # use static_alloc::FixedVec;
+///
+/// let mut memory: [MaybeUninit<usize>; 15] = [MaybeUninit::uninit(); 15];
+/// let mut source = FixedVec::new((&mut memory[..]).into());
+/// source.extend(0..15);
+///
+/// let mut memory: [MaybeUninit<usize>; 3] = [MaybeUninit::uninit(); 3];
+/// let mut target = FixedVec::new((&mut memory[..]).into());
+/// target.extend(source.drain(..));
+///
+/// assert!(source.is_empty());
+/// assert_eq!(target.len(), target.capacity());
+/// ```
+impl<T> iter::Extend<T> for FixedVec<'_, T> {
+    fn extend<I>(&mut self, iter: I)
+        where I: IntoIterator<Item=T>,
+    {
+        let _ = self.fill(iter);
     }
 }
 
