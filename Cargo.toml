@@ -1,6 +1,6 @@
 [package]
 name = "static-alloc"
-version = "0.1.1"
+version = "0.1.2"
 description = "Replacements for `Box`, `Rc`, `Vec`, .. without `alloc`"
 authors = ["Andreas Molzer <andreas.molzer@gmx.de>"]
 edition = "2018"

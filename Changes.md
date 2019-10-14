@@ -1,3 +1,9 @@
+# v0.1.2
+
+- Implemented `DoubleEndedIterator` for `fixed_vec::Drain`
+- Added some specialization trait implementions for `fixed_vec::Drain`
+- Implemented `Extend` for `FixedVec`
+
 # v0.1.1
 
 - Fixed UB in `FixedVec::fill`. This would drop uninitialized instances while
