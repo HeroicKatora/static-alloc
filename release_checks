@@ -8,7 +8,7 @@ check_notexists_version() {
 	final_agent="Release-Script/1.0 ${cirrus_agent:-(local)} (for static-alloc) (author:HeroicKatora)"
 	echo $final_agent
 	# Does the api information start with: '{"errors":'
-	[[ $(wget -U "$final_agent" "https://crates.io/api/v1/crates/static-alloc/$new_version" -qO -) == "{\"errors\":"* ]]
+	[[ $(wget -U "$final_agent" "https://crates.io/api/v1/crates/$crate/$new_version" -qO -) == "{\"errors\":"* ]]
 }
 
 git_considered_clean() {
@@ -33,11 +33,6 @@ make_git_tag() {
 	sed -e '1,/'"$new_version"'/d;/\#/,$d;/./,$!d' Changes.md | git tag -s $is_force -F - -e "v$new_version"
 }
 
-new_version="$(determine_new_version)"
-
-# check it is a sane version number
-[[ -z $(grep -vE '[0-9a-zA-Z.-]*' <<< "$new_version" ) ]] || { echo "Fail: Check version number: ${new_version}"; exit 1; }
-
 is_force=""
 do_tag=""
 
@@ -60,8 +55,17 @@ with WIP markers to help produce complete logs.
   
 EOF
 exit 1; } ;;
+		*) crate="$param";;
 	esac
 done
+
+[[ -z "$param" ]] && { echo "Provide a crate as parameter"; exit 1; }
+cd $crate
+
+new_version="$(determine_new_version)"
+
+# check it is a sane version number
+[[ -z $(grep -vE '[0-9a-zA-Z.-]*' <<< "$new_version" ) ]] || { echo "Fail: Check version number: ${new_version}"; exit 1; }
 
 # Check that the working dir is clean. May comment this out if it produces problems.
 git_considered_clean || { echo "Fail: Working directory is not clean"; exit 1; }

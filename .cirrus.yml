@@ -3,7 +3,7 @@ main_task:
     image: rust:latest
   cargo_cache:
     folder: $CARGO_HOME/registry
-    fingerprint_script: cat Cargo.lock
+    fingerprint_script: cargo update && cat Cargo.lock
   build_script: cargo build
   test_script: cargo test
   before_cache_script: rm -rf $CARGO_HOME/registry/index
@@ -13,16 +13,22 @@ nightly_task:
     image: rustlang/rust:nightly
   cargo_cache:
     folder: $CARGO_HOME/registry
-    fingerprint_script: cat Cargo.lock
+    fingerprint_script: cargo update && cat Cargo.lock
   build_script: cargo build --all-features
   test_script: cargo test --all-features
   before_cache_script: rm -rf $CARGO_HOME/registry/index
 
 release_task:
-  only_if: $CIRRUS_BRANCH =~ 'release.*'
+  only_if: $CIRRUS_BRANCH =~ 'release-static-alloc.*'
   container:
     image: rust:latest
-  script: ./release_checks
+  script: ./release_checks static-alloc
+
+release_task:
+  only_if: $CIRRUS_BRANCH =~ 'release-alloc-free.*'
+  container:
+    image: rust:latest
+  script: ./release_checks alloc-free
 
 doc_task:
   container:
