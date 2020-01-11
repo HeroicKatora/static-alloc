@@ -11,7 +11,7 @@ readme = "Readme.md"
 categories = ["embedded", "memory-management", "no-std"]
 
 [dependencies]
-# None. Kind of important.
+alloc-traits = { path = "../alloc-traits" }
 
 [features]
 # For apis depending on "try_reserve" (#48043).

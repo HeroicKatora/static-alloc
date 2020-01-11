@@ -736,6 +736,23 @@ unsafe impl<T> GlobalAlloc for Slab<T> {
     }
 }
 
+impl<'alloc, T> alloc_traits::LocalAlloc<'alloc> for Slab<T> {
+    fn alloc(&'alloc self, layout: alloc_traits::NonZeroLayout)
+        -> Option<alloc_traits::Allocation<'alloc>>
+    {
+        let raw_alloc = Slab::get_layout(self, layout.into())?;
+        Some(alloc_traits::Allocation {
+            ptr: raw_alloc.uninit.as_non_null().cast(),
+            layout: layout,
+            lifetime: alloc_traits::Invariant::default(),
+        })
+    }
+
+    unsafe fn dealloc(&'alloc self, _: alloc_traits::Allocation<'alloc>) {
+        // We are a slab allocator and do not deallocate.
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
