@@ -1,5 +1,6 @@
 [workspace]
 members = [
-	"static-alloc",
 	"alloc-free",
+	"alloc-traits",
+	"static-alloc",
 ]
