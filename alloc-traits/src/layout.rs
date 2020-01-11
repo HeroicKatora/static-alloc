@@ -1,4 +1,4 @@
-use core::alloc;
+use core::{alloc, convert};
 use core::num::NonZeroUsize;
 
 /// Layout of an allocated block of memory.
@@ -11,6 +11,9 @@ pub struct Layout(alloc::Layout);
 /// A non-empty layout which can be allocated.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct NonZeroLayout(Layout);
+
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
+pub struct EmptyLayoutError;
 
 impl Layout {
     pub fn size(&self) -> usize {
@@ -59,5 +62,21 @@ impl From<NonZeroLayout> for alloc::Layout {
 impl From<alloc::Layout> for Layout {
     fn from(layout: alloc::Layout) -> Layout {
         Layout(layout)
+    }
+}
+
+impl convert::TryFrom<Layout> for NonZeroLayout {
+    type Error = EmptyLayoutError;
+
+    fn try_from(layout: Layout) -> Result<Self, EmptyLayoutError> {
+       NonZeroLayout::from_layout(layout).ok_or(EmptyLayoutError)
+    }
+}
+
+impl convert::TryFrom<alloc::Layout> for NonZeroLayout {
+    type Error = EmptyLayoutError;
+
+    fn try_from(layout: alloc::Layout) -> Result<Self, EmptyLayoutError> {
+        NonZeroLayout::try_from(Layout::from(layout))
     }
 }
