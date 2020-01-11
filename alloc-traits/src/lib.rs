@@ -1,4 +1,10 @@
+#![cfg_attr(not(test), no_std)]
+#[cfg(test)]
+extern crate alloc;
+
 mod layout;
+#[cfg(test)]
+mod global;
 
 use core::fmt;
 use core::marker::PhantomData;
@@ -10,6 +16,8 @@ pub use layout::{Layout, NonZeroLayout};
 pub struct Invariant<'lt> {
     marker: PhantomData<&'lt fn(&'lt ())>,
 }
+
+pub struct Global;
 
 /// An allocation valid for a particular lifetime.
 ///
