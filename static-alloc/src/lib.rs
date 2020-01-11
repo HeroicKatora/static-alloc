@@ -51,15 +51,7 @@
 #![no_std]
 #![deny(missing_docs)]
 
-pub mod boxed;
-pub mod rc;
 pub mod slab;
-pub mod uninit;
-pub mod fixed_vec;
-
-pub use boxed::Box;
-pub use fixed_vec::FixedVec;
-pub use uninit::Uninit;
 pub use slab::Slab;
 
 // Can't use the macro-call itself within the `doc` attribute. So force it to eval it as part of
