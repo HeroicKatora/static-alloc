@@ -10,6 +10,8 @@ use core::mem::{self, MaybeUninit};
 use core::ptr::{NonNull, null_mut};
 use core::sync::atomic::{AtomicUsize, Ordering};
 
+use alloc_traits::{Invariant, LocalAlloc, NonZeroLayout};
+
 /// Allocator drawing from an inner, statically sized memory resource.
 ///
 /// The type parameter `T` is used only to annotate the required size and alignment of the region
@@ -228,23 +230,12 @@ pub struct Level(usize);
 ///
 /// [`Level`]: struct.Level.html
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Allocation {
-    /// Pointer to the region with specified layout.
-    pub ptr: NonNull<u8>,
+pub struct Allocation<'a, T=u8> {
+    /// Pointer to the uninitialized region with specified layout.
+    pub ptr: NonNull<T>,
 
-    /// The observed amount of consumed bytes.
-    pub level: Level,
-}
-
-/// Values of for some allocation including the [`Uninit`].
-///
-/// See [`Uninit`] for a better picture of the potential usage of this result.
-///
-/// [`Uninit`]: ../uninit/struct.Uninit.html
-#[derive(Debug)]
-pub struct UninitAllocation<'a, T=()> {
-    /// Uninit pointer to the region with specified layout.
-    pub uninit: Uninit<'a, T>,
+    /// The lifetime of the allocation.
+    pub lifetime: Invariant<'a>,
 
     /// The observed amount of consumed bytes after the allocation.
     pub level: Level,
@@ -310,7 +301,7 @@ impl<T> Slab<T> {
     /// `GlobalAlloc` this is explicitely forbidden to request and would allow any behaviour but we
     /// instead strictly check it.
     pub fn alloc(&self, layout: Layout) -> Option<NonNull<u8>> {
-        Some(self.try_alloc(layout)?.uninit.as_non_null().cast())
+        Some(self.try_alloc(layout)?.ptr)
     }
 
     /// Try to allocate some layout with a precise base location.
@@ -324,10 +315,11 @@ impl<T> Slab<T> {
     pub fn alloc_at(&self, layout: Layout, level: Level)
         -> Result<Allocation, Failure>
     {
-        let UninitAllocation { uninit, level } = self.try_alloc_at(layout, level.0)?;
+        let Allocation { ptr, lifetime, level } = self.try_alloc_at(layout, level.0)?;
 
         Ok(Allocation {
-            ptr: uninit.as_non_null().cast(),
+            ptr: ptr.cast(),
+            lifetime,
             level,
         })
     }
@@ -339,7 +331,7 @@ impl<T> Slab<T> {
     ///
     /// [`Uninit`]: ../uninit/struct.Uninit.html
     pub fn get_layout(&self, layout: Layout)
-        -> Option<UninitAllocation<'_>>
+        -> Option<Allocation<'_>>
     {
         self.try_alloc(layout)
     }
@@ -354,7 +346,7 @@ impl<T> Slab<T> {
     ///
     /// [`Uninit`]: ../uninit/struct.Uninit.html
     pub fn get_layout_at(&self, layout: Layout, at: Level)
-        -> Result<UninitAllocation<'_>, Failure>
+        -> Result<Allocation<'_>, Failure>
     {
         self.try_alloc_at(layout, at.0)
     }
@@ -378,17 +370,17 @@ impl<T> Slab<T> {
     ///
     /// assert_eq!(**cell_ref, 0xff);
     /// ```
-    pub fn get<V>(&self) -> Option<UninitAllocation<V>> {
+    pub fn get<V>(&self) -> Option<Allocation<V>> {
         if mem::size_of::<V>() == 0 {
             return Some(self.zst_fake_alloc());
         }
 
         let layout = Layout::new::<V>();
-        let UninitAllocation { uninit, level, } = self.try_alloc(layout)?;
+        let Allocation { ptr, lifetime, level, } = self.try_alloc(layout)?;
 
-        Some(UninitAllocation {
-            // UNWRAP: it has exactly the requested size of `V`.
-            uninit: uninit.cast().ok().unwrap(),
+        Some(Allocation {
+            ptr: ptr.cast(),
+            lifetime,
             level,
         })
     }
@@ -398,7 +390,7 @@ impl<T> Slab<T> {
     /// See [`get`] for usage.
     ///
     /// [`get`]: #method.get
-    pub fn get_at<V>(&self, level: Level) -> Result<UninitAllocation<V>, Failure> {
+    pub fn get_at<V>(&self, level: Level) -> Result<Allocation<V>, Failure> {
         if mem::size_of::<V>() == 0 {
             let fake = self.zst_fake_alloc();
             // Note: zst_fake_alloc is a noop on the level, we may as well check after.
@@ -411,11 +403,12 @@ impl<T> Slab<T> {
         }
 
         let layout = Layout::new::<V>();
-        let UninitAllocation { uninit, level, } = self.try_alloc_at(layout, level.0)?;
+        let Allocation { ptr, lifetime, level, } = self.try_alloc_at(layout, level.0)?;
 
-        Ok(UninitAllocation {
-            // UNWRAP: it has exactly the requested size of `V`.
-            uninit: uninit.cast().ok().unwrap(),
+        Ok(Allocation {
+            // It has exactly size and alignment for `V` as requested.
+            ptr: ptr.cast(),
+            lifetime,
             level,
         })
     }
@@ -431,7 +424,7 @@ impl<T> Slab<T> {
     }
 
     fn try_alloc(&self, layout: Layout)
-        -> Option<UninitAllocation<'_>>
+        -> Option<Allocation<'_>>
     {
         // Guess zero, this will fail when we try to access it and it isn't.
         let mut consumed = 0;
@@ -453,7 +446,7 @@ impl<T> Slab<T> {
     /// # Panics
     /// This function panics if `expect_consumed` is larger than `length`.
     fn try_alloc_at(&self, layout: Layout, expect_consumed: usize)
-        -> Result<UninitAllocation<'_>, Failure>
+        -> Result<Allocation<'_>, Failure>
     {
         assert!(layout.size() > 0);
         let length = mem::size_of::<T>();
@@ -502,14 +495,9 @@ impl<T> Slab<T> {
             (base_ptr as *mut u8).add(at_aligned)
         };
 
-        let ptr = NonNull::new(aligned).unwrap();
-        let uninit = unsafe {
-            // SAFETY: memory is valid and unaliased for the lifetime of our reference.
-            Uninit::from_memory(ptr.cast(), requested)
-        };
-
-        Ok(UninitAllocation {
-            uninit,
+        Ok(Allocation {
+            ptr: NonNull::new(aligned).unwrap(),
+            lifetime: Invariant::default(),
             level: Level(new_consumed),
         })
     }
@@ -573,7 +561,8 @@ impl<T> Slab<T> {
     /// [`ManuallyDrop::drop`]: https://doc.rust-lang.org/beta/std/mem/struct.ManuallyDrop.html#method.drop
     pub fn leak<V>(&self, val: V) -> Result<&mut V, LeakError<V>> {
         match self.get::<V>() {
-            Some(alloc) => Ok(alloc.uninit.init(val)),
+            // SAFETY: Just allocated this for a `V`.
+            Some(alloc) => Ok(unsafe { alloc.leak(val) }),
             None => Err(LeakError::new(val, Failure::Exhausted)),
         }
     }
@@ -616,14 +605,23 @@ impl<T> Slab<T> {
             Err(err) => return Err(LeakError::new(val, err)),
         };
 
-        let mutref = alloc.uninit.init(val);
-        Ok((mutref, alloc.level))
+        // SAFETY: Just allocated this for a `V`.
+        let level = alloc.level;
+        let mutref = unsafe { alloc.leak(val) };
+        Ok((mutref, level))
     }
 
     /// 'Allocate' a ZST.
-    fn zst_fake_alloc<Z>(&self) -> UninitAllocation<Z> {
-        UninitAllocation {
-            uninit: Uninit::invent_for_zst(),
+    fn zst_fake_alloc<Z>(&self) -> Allocation<'_, Z> {
+        assert!(mem::size_of::<Z>() == 0);
+        // If `Z` is a ZST, then the stride of any array is equal to 0. Thus, all arrays and slices
+        // havee the same layout which only depends on the alignment. If we need a storage for this
+        // ZST we just take one of those as our base 'allocation' which can also never be aliased.
+        let alloc: &[Z; 0] = &[];
+
+        Allocation {
+            ptr: NonNull::from(alloc).cast(),
+            lifetime: Invariant::default(),
             level: self.level(),
         }
     }
@@ -654,6 +652,16 @@ impl<T> Slab<T> {
         } else {
             Err(observed)
         }
+    }
+}
+
+impl<'alloc, T> Allocation<'alloc, T> {
+    /// Write a value into the allocation and leak it.
+    /// # Safety
+    /// Must have been allocated for a layout that fits the layout of T previously.
+    unsafe fn leak(self, val: T) -> &'alloc mut T {
+        core::ptr::write(self.ptr.as_ptr(), val);
+        &mut *self.ptr.as_ptr()
     }
 }
 
@@ -688,15 +696,15 @@ unsafe impl<T> GlobalAlloc for Slab<T> {
     }
 }
 
-impl<'alloc, T> alloc_traits::LocalAlloc<'alloc> for Slab<T> {
-    fn alloc(&'alloc self, layout: alloc_traits::NonZeroLayout)
+impl<'alloc, T> LocalAlloc<'alloc> for Slab<T> {
+    fn alloc(&'alloc self, layout: NonZeroLayout)
         -> Option<alloc_traits::Allocation<'alloc>>
     {
         let raw_alloc = Slab::get_layout(self, layout.into())?;
         Some(alloc_traits::Allocation {
-            ptr: raw_alloc.uninit.as_non_null().cast(),
+            ptr: raw_alloc.ptr,
             layout: layout,
-            lifetime: alloc_traits::Invariant::default(),
+            lifetime: Invariant::default(),
         })
     }
 

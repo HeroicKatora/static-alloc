@@ -21,11 +21,11 @@ nightly_try_reserve = []
 # Tests that test `Slab` as GlobalAlloc. Must be in a separate test each.
 [[test]]
 name = "vec"
-path = "tests/alloc/vec.rs"
+path = "tests/vec.rs"
 
 [[test]]
 name = "vec_try"
-path = "tests/alloc/vec_try.rs"
+path = "tests/vec_try.rs"
 required-features = ["nightly_try_reserve"]
 
 [[test]]
