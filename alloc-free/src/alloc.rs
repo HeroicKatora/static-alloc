@@ -27,7 +27,7 @@ pub trait LocalAllocLeakExt<'alloc>: LocalAlloc<'alloc> {
     /// bound by the lifetime of the reference to the allocator.
     ///
     /// [`Uninit`]: ../uninit/struct.Uninit.html
-    fn get_layout(&'alloc self, layout: NonZeroLayout)
+    fn alloc_layout(&'alloc self, layout: NonZeroLayout)
         -> Option<LeakedAllocation<'alloc>>
     {
         let alloc = self.alloc(layout)?;
@@ -61,11 +61,11 @@ pub trait LocalAllocLeakExt<'alloc>: LocalAlloc<'alloc> {
     ///
     /// assert_eq!(**cell_ref, 0xff);
     /// ```
-    fn get<V>(&'alloc self) -> Option<LeakedAllocation<'alloc, V>> {
+    fn alloc_t<V>(&'alloc self) -> Option<LeakedAllocation<'alloc, V>> {
         match NonZeroLayout::new::<V>() {
             None => Some(LeakedAllocation::zst_fake_alloc()),
             Some(alloc) => {
-                let allocation = self.get_layout(alloc)?;
+                let allocation = self.alloc_layout(alloc)?;
                 let right_type = allocation.cast().unwrap();
                 Some(right_type)
             },
@@ -79,7 +79,7 @@ pub trait LocalAllocLeakExt<'alloc>: LocalAlloc<'alloc> {
     ///
     /// [`Box`]: ../boxed/struct.Box.html
     fn boxed<V>(&'alloc self, val: V) -> Option<Box<'alloc, V>> {
-        let alloc = self.get::<V>()?;
+        let alloc = self.alloc_t::<V>()?;
         Some(Box::new(val, alloc.uninit))
     }
 
@@ -97,7 +97,7 @@ pub trait LocalAllocLeakExt<'alloc>: LocalAlloc<'alloc> {
         let uninit = match NonZeroLayout::from_layout(layout.into()) {
             None => Uninit::empty(),
             Some(layout) => {
-                let allocation = self.get_layout(layout)?;
+                let allocation = self.alloc_layout(layout)?;
                 let right_type = allocation.cast_slice().unwrap();
                 right_type.uninit
             }
@@ -116,10 +116,14 @@ pub trait LocalAllocLeakExt<'alloc>: LocalAlloc<'alloc> {
         let layout = Rc::<V>::layout();
         // Unwrap since this is surely never an empty layout, always have counter.
         let layout = NonZeroLayout::from_layout(layout.into()).unwrap();
-        let alloc = self.get_layout(layout)?;
+        let alloc = self.alloc_layout(layout)?;
         Some(Rc::new(val, alloc.uninit))
     }
 }
+
+impl<'alloc, T> LocalAllocLeakExt<'alloc> for T
+    where T: LocalAlloc<'alloc>,
+{ }
 
 impl<Zst> LeakedAllocation<'_, Zst> {
     pub fn zst_fake_alloc() -> Self {
