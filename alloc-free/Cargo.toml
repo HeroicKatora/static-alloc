@@ -8,3 +8,6 @@ edition = "2018"
 
 [dependencies]
 alloc-traits = { path = "../alloc-traits" }
+
+[dev-dependencies]
+static-alloc = { path = "../static-alloc" }

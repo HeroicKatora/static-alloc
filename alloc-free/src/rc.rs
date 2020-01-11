@@ -678,7 +678,8 @@ mod tests {
     use core::cell::Cell;
 
     use super::{RcBox, Rc, Weak};
-    use crate::Slab;
+    use static_alloc::Slab;
+    use crate::alloc::LocalAllocLeakExt;
 
     #[test]
     fn layout_box_compatible() {
@@ -739,10 +740,13 @@ mod tests {
     #[test]
     #[should_panic = "inner layout"]
     fn wrong_layout_panics() {
+        use core::convert::TryInto;
+
         struct Foo(u32);
 
         let slab: Slab<[u8; 1024]> = Slab::uninit();
-        let wrong_alloc = slab.get_layout(Layout::new::<Foo>()).unwrap();
+        let layout = Layout::new::<Foo>().try_into().unwrap();
+        let wrong_alloc = slab.alloc_layout(layout).unwrap();
 
         let _ = Rc::new(Foo(0), wrong_alloc.uninit);
     }

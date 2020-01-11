@@ -233,7 +233,8 @@ impl<T> AsMut<T> for Box<'_, T> {
 #[cfg(test)]
 mod tests {
     use super::Box;
-    use crate::Slab;
+    use crate::alloc::LocalAllocLeakExt;
+    use static_alloc::Slab;
 
    #[test]
     fn leak_with_smaller_lifetime() {

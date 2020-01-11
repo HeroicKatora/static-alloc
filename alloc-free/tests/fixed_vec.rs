@@ -1,5 +1,7 @@
 use core::mem::{self, MaybeUninit};
-use static_alloc::{FixedVec, Slab, Uninit};
+use alloc_free::alloc::LocalAllocLeakExt;
+use alloc_free::{FixedVec, Uninit};
+use static_alloc::Slab;
 
 #[test]
 fn create() {
