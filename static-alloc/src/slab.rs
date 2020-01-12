@@ -706,7 +706,7 @@ unsafe impl<T> GlobalAlloc for Slab<T> {
     }
 }
 
-impl<'alloc, T> LocalAlloc<'alloc> for Slab<T> {
+unsafe impl<'alloc, T> LocalAlloc<'alloc> for Slab<T> {
     fn alloc(&'alloc self, layout: NonZeroLayout)
         -> Option<alloc_traits::Allocation<'alloc>>
     {

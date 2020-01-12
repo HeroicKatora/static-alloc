@@ -50,13 +50,14 @@ pub trait LocalAllocLeakExt<'alloc>: LocalAlloc<'alloc> {
     ///
     /// ```
     /// # use static_alloc::Slab;
+    /// # use alloc_free::alloc::LocalAllocLeakExt;
     /// use core::cell::{Ref, RefCell};
     ///
     /// let slab: Slab<[Ref<'static, usize>; 1]> = Slab::uninit();
     /// let data = RefCell::new(0xff);
     ///
     /// // We can place a `Ref` here but we did not yet.
-    /// let alloc = slab.get::<Ref<usize>>().unwrap();
+    /// let alloc = slab.alloc_t::<Ref<usize>>().unwrap();
     /// let cell_ref = alloc.uninit.init(data.borrow());
     ///
     /// assert_eq!(**cell_ref, 0xff);
@@ -126,6 +127,10 @@ impl<'alloc, T> LocalAllocLeakExt<'alloc> for T
 { }
 
 impl<Zst> LeakedAllocation<'_, Zst> {
+    /// Invent a new allocation for a zero-sized type (ZST).
+    ///
+    /// # Panics
+    /// This method panics when the type parameter is not a zero sized type.
     pub fn zst_fake_alloc() -> Self {
         LeakedAllocation {
             uninit: Uninit::invent_for_zst(),

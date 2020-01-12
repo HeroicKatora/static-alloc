@@ -1,7 +1,7 @@
 [package]
 name = "static-alloc"
-version = "0.1.2"
-description = "Replacements for `Box`, `Rc`, `Vec`, .. without `alloc`"
+version = "0.2.0"
+description = "A bump allocator on static memory for the alloc-traits crate"
 authors = ["Andreas Molzer <andreas.molzer@gmx.de>"]
 edition = "2018"
 license = "MIT"

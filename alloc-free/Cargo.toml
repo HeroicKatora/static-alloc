@@ -1,10 +1,13 @@
 [package]
 name = "alloc-free"
-version = "0.1.0"
+version = "0.2.0"
+description = "Replacements for `Box`, `Rc`, `Vec`, .. without `alloc`"
 authors = ["Andreas Molzer <andreas.molzer@gmx.de>"]
 edition = "2018"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+documentation = "https://docs.rs/alloc-free"
+repository = "https://github.com/HeroicKatora/alloc-free"
+readme = "Readme.md"
+categories = ["embedded", "memory-management", "no-std"]
 
 [dependencies]
 alloc-traits = { path = "../alloc-traits" }

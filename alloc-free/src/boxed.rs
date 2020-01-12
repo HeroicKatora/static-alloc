@@ -14,7 +14,8 @@ use crate::uninit::Uninit;
 /// `Slab` with `'static` storage duration as the allocator:
 ///
 /// ```
-/// use static_alloc::{Box, Slab};
+/// use alloc_free::{Box, alloc::LocalAllocLeakExt};
+/// use static_alloc::Slab;
 ///
 /// #[derive(Debug)]
 /// enum List<T> {

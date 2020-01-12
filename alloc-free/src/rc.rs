@@ -84,12 +84,15 @@ impl<'a, T> Rc<'a, T> {
     /// ## Examples
     ///
     /// ```
-    /// use static_alloc::{Slab, rc::Rc};
+    /// use core::convert::TryInto;
+    /// use alloc_free::{alloc::LocalAllocLeakExt, rc::Rc};
+    /// use static_alloc::Slab;
     ///
     /// struct Foo(u32);
     ///
     /// let slab: Slab<[u8; 1024]> = Slab::uninit();
-    /// let memory = slab.get_layout(Rc::<Foo>::layout()).unwrap();
+    /// let layout = Rc::<Foo>::layout().try_into().unwrap();
+    /// let memory = slab.alloc_layout(layout).unwrap();
     /// let rc = Rc::new(Foo(0), memory.uninit);
     /// ```
     ///
@@ -133,7 +136,8 @@ impl<'a, T> Rc<'a, T> {
     /// ## Example
     ///
     /// ```
-    /// use static_alloc::{Slab, rc::Rc};
+    /// use alloc_free::{alloc::LocalAllocLeakExt, rc::Rc};
+    /// use static_alloc::Slab;
     ///
     /// struct HotPotato;
     ///
@@ -192,7 +196,8 @@ impl<'a, T> Rc<'a, T> {
     /// ## Example
     ///
     /// ```
-    /// use static_alloc::{Slab, rc::Rc};
+    /// use alloc_free::{alloc::LocalAllocLeakExt, rc::Rc};
+    /// use static_alloc::Slab;
     ///
     /// struct Foo;
     ///
@@ -225,7 +230,7 @@ impl<T> Rc<'_, T> {
     /// ## Examples
     ///
     /// ```
-    /// use static_alloc::rc::Rc;
+    /// use alloc_free::rc::Rc;
     ///
     /// struct Foo(u32);
     /// struct Empty;
@@ -271,7 +276,8 @@ impl<T> Rc<'_, T> {
     /// ## Example
     ///
     /// ```
-    /// use static_alloc::{Slab, rc::Rc};
+    /// use alloc_free::{alloc::LocalAllocLeakExt, rc::Rc};
+    /// use static_alloc::Slab;
     ///
     /// struct Foo;
     ///
@@ -350,13 +356,14 @@ impl<'a, T> Weak<'a, T> {
     /// ## Example
     ///
     /// ```
-    /// use static_alloc::{rc, Slab};
+    /// use alloc_free::{alloc::LocalAllocLeakExt, rc::Rc};
+    /// use static_alloc::Slab;
     ///
     /// struct Foo;
     ///
     /// let slab: Slab<[u8; 1024]> = Slab::uninit();
     /// let rc = slab.rc(Foo).unwrap();
-    /// let (_, weak) = rc::Rc::try_unwrap(rc).ok().unwrap();
+    /// let (_, weak) = Rc::try_unwrap(rc).ok().unwrap();
     ///
     /// // This is the only one pointing at the allocation.
     /// let memory = weak.try_unwrap().ok().unwrap();
@@ -383,12 +390,13 @@ impl<'a, T> Weak<'a, T> {
     /// extended.
     ///
     /// ```
-    /// use static_alloc::{rc, Slab};
+    /// use alloc_free::{alloc::LocalAllocLeakExt, rc::Rc};
+    /// use static_alloc::Slab;
     ///
     /// let memory: Slab<[u8; 1024]> = Slab::uninit();
     /// let rc = memory.rc(0usize).unwrap();
     ///
-    /// let weak = rc::Rc::downgrade(&rc);
+    /// let weak = Rc::downgrade(&rc);
     /// let rc2 = weak.upgrade().unwrap();
     ///
     /// drop(rc);
@@ -414,16 +422,17 @@ impl<T> Weak<'_, T> {
     /// ## Example
     ///
     /// ```
-    /// use static_alloc::{rc, Slab};
+    /// use alloc_free::{alloc::LocalAllocLeakExt, rc::Rc, rc::Weak};
+    /// use static_alloc::Slab;
     ///
     /// struct Foo;
     ///
     /// let slab: Slab<[u8; 1024]> = Slab::uninit();
     /// let rc = slab.rc(Foo).unwrap();
-    /// let (_, weak) = rc::Rc::try_unwrap(rc).ok().unwrap();
+    /// let (_, weak) = Rc::try_unwrap(rc).ok().unwrap();
     ///
     /// // We just destroyed the only one.
-    /// assert_eq!(rc::Weak::strong_count(&weak), 0);
+    /// assert_eq!(Weak::strong_count(&weak), 0);
     /// ```
     pub fn strong_count(&self) -> usize {
         self.strong().get()
@@ -434,16 +443,17 @@ impl<T> Weak<'_, T> {
     /// ## Example
     ///
     /// ```
-    /// use static_alloc::{rc, Slab};
+    /// use alloc_free::{alloc::LocalAllocLeakExt, rc::Rc, rc::Weak};
+    /// use static_alloc::Slab;
     ///
     /// struct Foo;
     ///
     /// let slab: Slab<[u8; 1024]> = Slab::uninit();
     /// let rc = slab.rc(Foo).unwrap();
-    /// let (_, weak) = rc::Rc::try_unwrap(rc).ok().unwrap();
+    /// let (_, weak) = Rc::try_unwrap(rc).ok().unwrap();
     ///
     /// // This is the only one pointing at the allocation.
-    /// assert_eq!(rc::Weak::weak_count(&weak), 1);
+    /// assert_eq!(Weak::weak_count(&weak), 1);
     /// ```
     pub fn weak_count(&self) -> usize {
         self.weak().get()
@@ -488,7 +498,8 @@ impl<T> Drop for Rc<'_, T> {
     /// # Examples
     ///
     /// ```
-    /// use static_alloc::{Slab, rc::Rc};
+    /// use alloc_free::{alloc::LocalAllocLeakExt, rc::Rc};
+    /// use static_alloc::Slab;
     ///
     /// struct Foo;
     ///
@@ -536,7 +547,8 @@ impl<T> Clone for Rc<'_, T> {
     /// # Examples
     ///
     /// ```
-    /// use static_alloc::{Slab, rc::Rc};
+    /// use alloc_free::{alloc::LocalAllocLeakExt, rc::Rc};
+    /// use static_alloc::Slab; 
     ///
     /// struct Foo;
     ///
@@ -571,14 +583,15 @@ impl<T> Clone for Weak<'_, T> {
     /// # Examples
     ///
     /// ```
-    /// use static_alloc::{rc, Slab};
+    /// use alloc_free::{alloc::LocalAllocLeakExt, rc::Rc};
+    /// use static_alloc::Slab;
     ///
     /// struct Foo;
     ///
     /// let slab: Slab<[u8; 1024]> = Slab::uninit();
     /// let foo = slab.rc(Foo).unwrap();
     ///
-    /// let (_, weak) = rc::Rc::try_unwrap(foo).ok().unwrap();
+    /// let (_, weak) = Rc::try_unwrap(foo).ok().unwrap();
     /// assert_eq!(weak.weak_count(), 1);
     ///
     /// let weak2 = weak.clone();
