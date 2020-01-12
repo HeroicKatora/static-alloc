@@ -16,20 +16,32 @@ pub struct NonZeroLayout(Layout);
 pub struct EmptyLayoutError;
 
 impl Layout {
+    /// Create the layout for a type.
+    pub fn new<T>() -> Self {
+        Layout(alloc::Layout::new::<T>())
+    }
+
+    /// Return the size of the layout.
     pub fn size(&self) -> usize {
         self.0.size()
     }
 
+    /// Return the alignment of the layout.
     pub fn align(&self) -> usize {
         self.0.align()
     }
 }
 
 impl NonZeroLayout {
+    /// Create the layout for a type.
+    ///
+    /// This succeeds exactly if the type is not a zero-sized type. Otherwise this constructor
+    /// returns `None`.
     pub fn new<T>() -> Option<Self> {
-        Self::from_layout(alloc::Layout::new::<T>().into())
+        Self::from_layout(Layout::new::<T>())
     }
 
+    /// Creates a non-empty layout if the given layout is not empty.
     pub fn from_layout(layout: Layout) -> Option<Self> {
         if layout.size() == 0 {
             None
@@ -38,10 +50,12 @@ impl NonZeroLayout {
         }
     }
 
+    /// Return the size of the layout.
     pub fn size(&self) -> NonZeroUsize {
         NonZeroUsize::new(self.0.size()).unwrap()
     }
 
+    /// Return the alignment of the layout.
     pub fn align(&self) -> usize {
         self.0.align()
     }
