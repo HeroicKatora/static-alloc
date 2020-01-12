@@ -21,25 +21,6 @@
 //! }
 //! ```
 //!
-//! `FixedVec` without forced `Clone` or `Copy` semantics:
-//!
-//! ```rust
-//! use static_alloc::{FixedVec, Slab};
-//!
-//! let mut pool: Slab<[usize; 16]> = Slab::uninit();
-//! // Allocate a vector with capacity of 16 from the slab.
-//! let mut vector = pool.fixed_vec(16).unwrap();
-//!
-//! let mut num = 0;
-//! // Push a mutable reference, not `Copy` nor `Clone`!
-//! vector.push(&mut num);
-//!
-//! *vector.pop().unwrap() = 4;
-//! drop(vector);
-//!
-//! assert_eq!(num, 4);
-//! ```
-//!
 //! ## Why the name?
 //!
 //! This crates makes it safe to define a *static* object and to then use its memory to *allocate*

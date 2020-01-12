@@ -366,7 +366,9 @@ impl<T> Slab<T> {
     ///
     /// // We can place a `Ref` here but we did not yet.
     /// let alloc = slab.get::<Ref<usize>>().unwrap();
-    /// let cell_ref = alloc.uninit.init(data.borrow());
+    /// let cell_ref = unsafe {
+    ///     alloc.leak(data.borrow())
+    /// };
     ///
     /// assert_eq!(**cell_ref, 0xff);
     /// ```
@@ -657,9 +659,17 @@ impl<T> Slab<T> {
 
 impl<'alloc, T> Allocation<'alloc, T> {
     /// Write a value into the allocation and leak it.
-    /// # Safety
+    ///
+    /// ## Safety
+    ///
     /// Must have been allocated for a layout that fits the layout of T previously.
-    unsafe fn leak(self, val: T) -> &'alloc mut T {
+    ///
+    /// ## Usage
+    ///
+    /// Consider the alternative [`Slab::leak`] to safely allocate and directly leak a value.
+    ///
+    /// [`Slab::leak`]: struct.Slab.html#method.leak
+    pub unsafe fn leak(self, val: T) -> &'alloc mut T {
         core::ptr::write(self.ptr.as_ptr(), val);
         &mut *self.ptr.as_ptr()
     }

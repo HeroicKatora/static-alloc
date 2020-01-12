@@ -45,41 +45,6 @@ fn main() {
 }
 ```
 
-For recursive data structures:
-
-```rust
-use static_alloc::{Box, Slab};
-
-enum List {
-    Nil,
-    Cons(u8, Box<'static, List>),
-}
-
-static SLAB: Slab<[u8; 1024]> = Slab::uninit();
-
-let base = SLAB.boxed(List::Nil).unwrap();
-let one = SLAB.boxed(List::Cons(0, base)).unwrap();
-let two = SLAB.boxed(List::Cons(1, one)).unwrap();
-```
-
-As local memory pools for fixed capacity `FixedVec`:
-
-```rust
-use static_alloc::{FixedVec, Slab};
-
-let mut pool: Slab<[usize; 16]> = Slab::uninit();
-// Allocate a vector with capacity of 16 from the slab.
-let mut vector = pool.fixed_vec(16).unwrap();
-
-let mut num = 0;
-// Push mutable ref, not `'static`, `Copy` nor `Clone`!
-vector.push(&mut num);
-*vector[0] = 42;
-
-drop(vector);
-assert_eq!(num, 42);
-```
-
 ## Contributing
 
 PRs introducing more tests or documentation are very welcome! Whatever else
