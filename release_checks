@@ -5,7 +5,7 @@ determine_new_version() {
 
 check_notexists_version() {
 	cirrus_agent="${CIRRUS_CI/?*/(Cirrus-CI)}"
-	final_agent="Release-Script/1.0 ${cirrus_agent:-(local)} (for static-alloc) (author:HeroicKatora)"
+	final_agent="Release-Script/1.0 ${cirrus_agent:-(local)} (for $crate) (author:HeroicKatora)"
 	echo $final_agent
 	# Does the api information start with: '{"errors":'
 	[[ $(wget -U "$final_agent" "https://crates.io/api/v1/crates/$crate/$new_version" -qO -) == "{\"errors\":"* ]]
