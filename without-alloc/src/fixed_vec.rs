@@ -20,7 +20,7 @@ use crate::uninit::Uninit;
 ///
 /// ```
 /// use core::mem::MaybeUninit;
-/// use static_alloc::FixedVec;
+/// use without_alloc::FixedVec;
 ///
 /// let mut memory: [MaybeUninit<usize>; 15] = [MaybeUninit::uninit(); 15];
 /// let mut stack = FixedVec::new((&mut memory[..]).into());
@@ -37,12 +37,13 @@ use crate::uninit::Uninit;
 /// ## With `Slab`
 ///
 /// One focus of the library is composability. It should not be surprising that `FixedVec`
-/// interacts with the [`Slab`] allocator, which implements a specialized interface providing the
-/// [`Uninit`] type instead of a raw `*const u8`. Hence, the `FixedVec` can use this instead of its
-/// own local stack variables.
+/// interacts with the [`LocalAlloc`] allocators, which implements a specialized interface
+/// providing the [`Uninit`] type instead of a raw `*const u8`, through an extension trait. Hence,
+/// the `FixedVec` can use this instead of its own local stack variables.
 ///
 /// ```
-/// use static_alloc::{FixedVec, Slab};
+/// use static_alloc::Slab;
+/// use without_alloc::{FixedVec, alloc::LocalAllocLeakExt};
 ///
 /// let alloc: Slab<[u8; 1 << 12]> = Slab::uninit();
 /// let some_usize = alloc.leak(0_usize).unwrap();
@@ -70,7 +71,7 @@ use crate::uninit::Uninit;
 ///
 /// ```
 /// use core::mem::MaybeUninit;
-/// use static_alloc::{FixedVec, Uninit};
+/// use without_alloc::{FixedVec, Uninit};
 ///
 /// struct MyStruct {
 ///     // ..
@@ -129,7 +130,7 @@ impl<T> FixedVec<'_, T> {
     ///
     /// ```
     /// # use core::mem::MaybeUninit;
-    /// # use static_alloc::{FixedVec, Uninit};
+    /// # use without_alloc::{FixedVec, Uninit};
     ///
     /// let mut memory: [MaybeUninit<usize>; 4] = [MaybeUninit::uninit(); 4];
     /// let mut vec = FixedVec::new(Uninit::from(&mut memory[..]));
@@ -224,8 +225,8 @@ impl<T> FixedVec<'_, T> {
     /// Return `Err(val)` if it is not possible to append the element.
     ///
     /// ```
-    /// use static_alloc::{FixedVec, Uninit};
     /// use core::mem::MaybeUninit;
+    /// use without_alloc::{FixedVec, Uninit};
     ///
     /// // Only enough storage for one element.
     /// let mut allocation: [MaybeUninit<u32>; 1] = [MaybeUninit::uninit()];
@@ -284,7 +285,8 @@ impl<T> FixedVec<'_, T> {
     /// ## Examples
     ///
     /// ```
-    /// use static_alloc::{FixedVec, Slab};
+    /// use without_alloc::{FixedVec, alloc::LocalAllocLeakExt};
+    /// use static_alloc::Slab;
     ///
     /// let mut memory: Slab<[usize; 8]> = Slab::uninit();
     /// let mut vec = memory.fixed_vec::<usize>(8).unwrap();
@@ -679,7 +681,7 @@ impl<T> Drop for Drain<'_, T> {
 ///
 /// ```
 /// # use core::mem::MaybeUninit;
-/// # use static_alloc::FixedVec;
+/// # use without_alloc::FixedVec;
 ///
 /// let mut memory: [MaybeUninit<usize>; 15] = [MaybeUninit::uninit(); 15];
 /// let mut source = FixedVec::new((&mut memory[..]).into());

@@ -1,35 +1,6 @@
-[package]
-name = "static-alloc"
-version = "0.1.2"
-description = "Replacements for `Box`, `Rc`, `Vec`, .. without `alloc`"
-authors = ["Andreas Molzer <andreas.molzer@gmx.de>"]
-edition = "2018"
-license = "MIT"
-documentation = "https://docs.rs/static-alloc"
-repository = "https://github.com/HeroicKatora/static-alloc"
-readme = "Readme.md"
-categories = ["embedded", "memory-management", "no-std"]
-
-[dependencies]
-# None. Kind of important.
-
-[features]
-# For apis depending on "try_reserve" (#48043).
-# Currently only used in a test for ensure future opportunities.
-nightly_try_reserve = []
-
-# Tests that test `Slab` as GlobalAlloc. Must be in a separate test each.
-[[test]]
-name = "vec"
-path = "tests/alloc/vec.rs"
-
-[[test]]
-name = "vec_try"
-path = "tests/alloc/vec_try.rs"
-required-features = ["nightly_try_reserve"]
-
-[[test]]
-name = "huuuuuge"
-path = "tests/alloc/huuuuuge.rs"
-# Disabled because it chokes rustc. Just a PoC.
-required-features = ["DISABLED"]
+[workspace]
+members = [
+	"alloc-traits",
+	"static-alloc",
+	"without-alloc",
+]

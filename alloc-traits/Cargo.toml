@@ -1,0 +1,16 @@
+[package]
+name = "alloc-traits"
+version = "0.1.0"
+description = "Traits to replace or supplement the alloc module in no_std"
+authors = ["Andreas Molzer <andreas.molzer@gmx.de>"]
+edition = "2018"
+license = "MIT"
+documentation = "https://docs.rs/static-alloc"
+repository = "https://github.com/HeroicKatora/static-alloc"
+categories = ["embedded", "memory-management", "no-std"]
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[lib]
+name = "alloc_traits"
+
+[dependencies]

@@ -1,0 +1,16 @@
+[package]
+name = "without-alloc"
+version = "0.2.0"
+description = "Replacements for `Box`, `Rc`, `Vec`, .. without `alloc`"
+authors = ["Andreas Molzer <andreas.molzer@gmx.de>"]
+edition = "2018"
+documentation = "https://docs.rs/without-alloc"
+repository = "https://github.com/HeroicKatora/alloc-free"
+readme = "Readme.md"
+categories = ["embedded", "memory-management", "no-std"]
+
+[dependencies]
+alloc-traits = { path = "../alloc-traits", version = "0.1.0" }
+
+[dev-dependencies]
+static-alloc = { path = "../static-alloc" }

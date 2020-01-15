@@ -1,0 +1,35 @@
+[package]
+name = "static-alloc"
+version = "0.2.0"
+description = "A bump allocator on static memory for the alloc-traits crate"
+authors = ["Andreas Molzer <andreas.molzer@gmx.de>"]
+edition = "2018"
+license = "MIT"
+documentation = "https://docs.rs/static-alloc"
+repository = "https://github.com/HeroicKatora/static-alloc"
+readme = "Readme.md"
+categories = ["embedded", "memory-management", "no-std"]
+
+[dependencies]
+alloc-traits = { path = "../alloc-traits", version = "0.1.0" }
+
+[features]
+# For apis depending on "try_reserve" (#48043).
+# Currently only used in a test for ensure future opportunities.
+nightly_try_reserve = []
+
+# Tests that test `Slab` as GlobalAlloc. Must be in a separate test each.
+[[test]]
+name = "vec"
+path = "tests/vec.rs"
+
+[[test]]
+name = "vec_try"
+path = "tests/vec_try.rs"
+required-features = ["nightly_try_reserve"]
+
+[[test]]
+name = "huuuuuge"
+path = "tests/alloc/huuuuuge.rs"
+# Disabled because it chokes rustc. Just a PoC.
+required-features = ["DISABLED"]

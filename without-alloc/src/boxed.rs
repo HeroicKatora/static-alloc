@@ -14,7 +14,8 @@ use crate::uninit::Uninit;
 /// `Slab` with `'static` storage duration as the allocator:
 ///
 /// ```
-/// use static_alloc::{Box, Slab};
+/// use without_alloc::{Box, alloc::LocalAllocLeakExt};
+/// use static_alloc::Slab;
 ///
 /// #[derive(Debug)]
 /// enum List<T> {
@@ -233,7 +234,8 @@ impl<T> AsMut<T> for Box<'_, T> {
 #[cfg(test)]
 mod tests {
     use super::Box;
-    use crate::Slab;
+    use crate::alloc::LocalAllocLeakExt;
+    use static_alloc::Slab;
 
    #[test]
     fn leak_with_smaller_lifetime() {

@@ -1,5 +1,8 @@
 use core::mem;
-use static_alloc::{rc, Slab};
+use core::convert::TryInto;
+use without_alloc::alloc::LocalAllocLeakExt;
+use without_alloc::rc;
+use static_alloc::Slab;
 
 #[test]
 fn create() {
@@ -32,7 +35,8 @@ fn reference_juggling() {
     }
 
     let memory: Slab<[u8; 1024]> = Slab::uninit();
-    let alloc = memory.get_layout(rc::Rc::<HotPotato>::layout()).unwrap();
+    let layout = rc::Rc::<HotPotato>::layout().try_into().unwrap();
+    let alloc = LocalAllocLeakExt::alloc_layout(&memory, layout).unwrap();
     let ptr = alloc.uninit.as_non_null();
     let mut foo = rc::Rc::new(HotPotato(0), alloc.uninit);
 

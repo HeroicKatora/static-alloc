@@ -1,4 +1,5 @@
-use static_alloc::boxed::Box;
+use without_alloc::alloc::LocalAllocLeakExt;
+use without_alloc::boxed::Box;
 use static_alloc::Slab;
 
 #[test]

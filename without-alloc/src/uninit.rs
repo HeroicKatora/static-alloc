@@ -28,7 +28,7 @@ use crate::boxed::Box;
 /// # #[derive(Default)]
 /// # struct MyStruct { };
 /// use core::mem::MaybeUninit;
-/// use static_alloc::Uninit;
+/// use without_alloc::Uninit;
 ///
 /// let mut alloc: MaybeUninit<MyStruct> = MaybeUninit::uninit();
 /// let uninit = Uninit::from_maybe_uninit(&mut alloc);
@@ -43,7 +43,7 @@ use crate::boxed::Box;
 ///
 /// ```
 /// use core::mem::MaybeUninit;
-/// use static_alloc::Uninit;
+/// use without_alloc::Uninit;
 ///
 /// // Just a generic buffer.
 /// let mut alloc: MaybeUninit<[u32; 1024]> = MaybeUninit::uninit();
