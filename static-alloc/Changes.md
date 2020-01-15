@@ -1,3 +1,10 @@
+# v0.2.0
+
+Remodeled the crate into independent subcrates
+- This crate maintains the allocator based on a static array in the binary
+- `alloc-traits` contains the interface for non-global allocations from it
+- All data structures have been moved to `without-alloc`
+
 # v0.1.2
 
 - Implemented `DoubleEndedIterator` for `fixed_vec::Drain`
