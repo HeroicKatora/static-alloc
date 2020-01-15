@@ -10,7 +10,7 @@ readme = "Readme.md"
 categories = ["embedded", "memory-management", "no-std"]
 
 [dependencies]
-alloc-traits = { path = "../alloc-traits" }
+alloc-traits = { path = "../alloc-traits", version = "0.1.0" }
 
 [dev-dependencies]
 static-alloc = { path = "../static-alloc" }
