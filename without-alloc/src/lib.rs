@@ -10,7 +10,7 @@
 //!
 //! ```rust
 //! use static_alloc::Slab;
-//! use alloc_free::{FixedVec, alloc::LocalAllocLeakExt};
+//! use without_alloc::{FixedVec, alloc::LocalAllocLeakExt};
 //!
 //! let mut pool: Slab<[usize; 16]> = Slab::uninit();
 //! // Allocate a vector with capacity of 16 from the slab.

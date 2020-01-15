@@ -25,10 +25,16 @@ release_task:
   script: ./release_checks static-alloc
 
 release_task:
-  only_if: $CIRRUS_BRANCH =~ 'release-alloc-free.*'
+  only_if: $CIRRUS_BRANCH =~ 'release-alloc-traits.*'
   container:
     image: rust:latest
-  script: ./release_checks alloc-free
+  script: ./release_checks alloc-traits
+
+release_task:
+  only_if: $CIRRUS_BRANCH =~ 'release-without-alloc.*'
+  container:
+    image: rust:latest
+  script: ./release_checks without-alloc
 
 doc_task:
   container:

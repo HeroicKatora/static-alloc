@@ -1,8 +1,8 @@
-# alloc-free
+# without-alloc
 
-[![Crates.io Status](https://img.shields.io/crates/v/alloc-free.svg)](https://crates.io/crates/alloc-free)
-[![Docs.rs Status](https://docs.rs/alloc-free/badge.svg)](https://docs.rs/alloc-free/)
-[![License](https://img.shields.io/badge/license-MIT-blue.svg)](https://raw.githubusercontent.com/HeroicKatora/alloc-free/LICENSE)
+[![Crates.io Status](https://img.shields.io/crates/v/without-alloc.svg)](https://crates.io/crates/without-alloc)
+[![Docs.rs Status](https://docs.rs/without-alloc/badge.svg)](https://docs.rs/without-alloc/)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](https://raw.githubusercontent.com/HeroicKatora/without-alloc/LICENSE)
 [![CI Status](https://api.cirrus-ci.com/github/HeroicKatora/alloc-free.svg)](https://cirrus-ci.com/github/HeroicKatora/alloc-free)
 
 Dynamic data structures that do not require a global allocator.
@@ -15,8 +15,8 @@ list with static lifetime based on dynamic data. As local memory pools for
 fixed capacity `FixedVec`:
 
 ```rust
-use alloc_free::{FixedVec, alloc::LocalAllocLeakExt};
 use static_alloc::Slab;
+use without_alloc::{FixedVec, alloc::LocalAllocLeakExt};
 
 let mut pool: Slab<[usize; 16]> = Slab::uninit();
 // Allocate a vector with capacity of 16 from the slab.
@@ -35,8 +35,8 @@ This might be handy if you want to chain boot another kernel and pass it a
 linked list describing the platform.
 
 ```rust
-use alloc_free::{Box, alloc::LocalAllocLeakExt};
 use static_alloc::Slab;
+use without_alloc::{Box, alloc::LocalAllocLeakExt};
 
 enum List {
     Nil,

@@ -1,7 +1,7 @@
 use core::mem;
 use core::convert::TryInto;
-use alloc_free::alloc::LocalAllocLeakExt;
-use alloc_free::rc;
+use without_alloc::alloc::LocalAllocLeakExt;
+use without_alloc::rc;
 use static_alloc::Slab;
 
 #[test]

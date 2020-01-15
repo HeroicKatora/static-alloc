@@ -85,7 +85,7 @@ impl<'a, T> Rc<'a, T> {
     ///
     /// ```
     /// use core::convert::TryInto;
-    /// use alloc_free::{alloc::LocalAllocLeakExt, rc::Rc};
+    /// use without_alloc::{alloc::LocalAllocLeakExt, rc::Rc};
     /// use static_alloc::Slab;
     ///
     /// struct Foo(u32);
@@ -136,7 +136,7 @@ impl<'a, T> Rc<'a, T> {
     /// ## Example
     ///
     /// ```
-    /// use alloc_free::{alloc::LocalAllocLeakExt, rc::Rc};
+    /// use without_alloc::{alloc::LocalAllocLeakExt, rc::Rc};
     /// use static_alloc::Slab;
     ///
     /// struct HotPotato;
@@ -196,7 +196,7 @@ impl<'a, T> Rc<'a, T> {
     /// ## Example
     ///
     /// ```
-    /// use alloc_free::{alloc::LocalAllocLeakExt, rc::Rc};
+    /// use without_alloc::{alloc::LocalAllocLeakExt, rc::Rc};
     /// use static_alloc::Slab;
     ///
     /// struct Foo;
@@ -230,7 +230,7 @@ impl<T> Rc<'_, T> {
     /// ## Examples
     ///
     /// ```
-    /// use alloc_free::rc::Rc;
+    /// use without_alloc::rc::Rc;
     ///
     /// struct Foo(u32);
     /// struct Empty;
@@ -276,7 +276,7 @@ impl<T> Rc<'_, T> {
     /// ## Example
     ///
     /// ```
-    /// use alloc_free::{alloc::LocalAllocLeakExt, rc::Rc};
+    /// use without_alloc::{alloc::LocalAllocLeakExt, rc::Rc};
     /// use static_alloc::Slab;
     ///
     /// struct Foo;
@@ -356,7 +356,7 @@ impl<'a, T> Weak<'a, T> {
     /// ## Example
     ///
     /// ```
-    /// use alloc_free::{alloc::LocalAllocLeakExt, rc::Rc};
+    /// use without_alloc::{alloc::LocalAllocLeakExt, rc::Rc};
     /// use static_alloc::Slab;
     ///
     /// struct Foo;
@@ -390,7 +390,7 @@ impl<'a, T> Weak<'a, T> {
     /// extended.
     ///
     /// ```
-    /// use alloc_free::{alloc::LocalAllocLeakExt, rc::Rc};
+    /// use without_alloc::{alloc::LocalAllocLeakExt, rc::Rc};
     /// use static_alloc::Slab;
     ///
     /// let memory: Slab<[u8; 1024]> = Slab::uninit();
@@ -422,7 +422,7 @@ impl<T> Weak<'_, T> {
     /// ## Example
     ///
     /// ```
-    /// use alloc_free::{alloc::LocalAllocLeakExt, rc::Rc, rc::Weak};
+    /// use without_alloc::{alloc::LocalAllocLeakExt, rc::Rc, rc::Weak};
     /// use static_alloc::Slab;
     ///
     /// struct Foo;
@@ -443,7 +443,7 @@ impl<T> Weak<'_, T> {
     /// ## Example
     ///
     /// ```
-    /// use alloc_free::{alloc::LocalAllocLeakExt, rc::Rc, rc::Weak};
+    /// use without_alloc::{alloc::LocalAllocLeakExt, rc::Rc, rc::Weak};
     /// use static_alloc::Slab;
     ///
     /// struct Foo;
@@ -498,7 +498,7 @@ impl<T> Drop for Rc<'_, T> {
     /// # Examples
     ///
     /// ```
-    /// use alloc_free::{alloc::LocalAllocLeakExt, rc::Rc};
+    /// use without_alloc::{alloc::LocalAllocLeakExt, rc::Rc};
     /// use static_alloc::Slab;
     ///
     /// struct Foo;
@@ -547,7 +547,7 @@ impl<T> Clone for Rc<'_, T> {
     /// # Examples
     ///
     /// ```
-    /// use alloc_free::{alloc::LocalAllocLeakExt, rc::Rc};
+    /// use without_alloc::{alloc::LocalAllocLeakExt, rc::Rc};
     /// use static_alloc::Slab; 
     ///
     /// struct Foo;
@@ -583,7 +583,7 @@ impl<T> Clone for Weak<'_, T> {
     /// # Examples
     ///
     /// ```
-    /// use alloc_free::{alloc::LocalAllocLeakExt, rc::Rc};
+    /// use without_alloc::{alloc::LocalAllocLeakExt, rc::Rc};
     /// use static_alloc::Slab;
     ///
     /// struct Foo;

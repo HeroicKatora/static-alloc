@@ -1,10 +1,10 @@
 [package]
-name = "alloc-free"
+name = "without-alloc"
 version = "0.2.0"
 description = "Replacements for `Box`, `Rc`, `Vec`, .. without `alloc`"
 authors = ["Andreas Molzer <andreas.molzer@gmx.de>"]
 edition = "2018"
-documentation = "https://docs.rs/alloc-free"
+documentation = "https://docs.rs/without-alloc"
 repository = "https://github.com/HeroicKatora/alloc-free"
 readme = "Readme.md"
 categories = ["embedded", "memory-management", "no-std"]

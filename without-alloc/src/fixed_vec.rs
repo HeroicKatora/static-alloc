@@ -20,7 +20,7 @@ use crate::uninit::Uninit;
 ///
 /// ```
 /// use core::mem::MaybeUninit;
-/// use alloc_free::FixedVec;
+/// use without_alloc::FixedVec;
 ///
 /// let mut memory: [MaybeUninit<usize>; 15] = [MaybeUninit::uninit(); 15];
 /// let mut stack = FixedVec::new((&mut memory[..]).into());
@@ -43,7 +43,7 @@ use crate::uninit::Uninit;
 ///
 /// ```
 /// use static_alloc::Slab;
-/// use alloc_free::{FixedVec, alloc::LocalAllocLeakExt};
+/// use without_alloc::{FixedVec, alloc::LocalAllocLeakExt};
 ///
 /// let alloc: Slab<[u8; 1 << 12]> = Slab::uninit();
 /// let some_usize = alloc.leak(0_usize).unwrap();
@@ -71,7 +71,7 @@ use crate::uninit::Uninit;
 ///
 /// ```
 /// use core::mem::MaybeUninit;
-/// use alloc_free::{FixedVec, Uninit};
+/// use without_alloc::{FixedVec, Uninit};
 ///
 /// struct MyStruct {
 ///     // ..
@@ -130,7 +130,7 @@ impl<T> FixedVec<'_, T> {
     ///
     /// ```
     /// # use core::mem::MaybeUninit;
-    /// # use alloc_free::{FixedVec, Uninit};
+    /// # use without_alloc::{FixedVec, Uninit};
     ///
     /// let mut memory: [MaybeUninit<usize>; 4] = [MaybeUninit::uninit(); 4];
     /// let mut vec = FixedVec::new(Uninit::from(&mut memory[..]));
@@ -226,7 +226,7 @@ impl<T> FixedVec<'_, T> {
     ///
     /// ```
     /// use core::mem::MaybeUninit;
-    /// use alloc_free::{FixedVec, Uninit};
+    /// use without_alloc::{FixedVec, Uninit};
     ///
     /// // Only enough storage for one element.
     /// let mut allocation: [MaybeUninit<u32>; 1] = [MaybeUninit::uninit()];
@@ -285,7 +285,7 @@ impl<T> FixedVec<'_, T> {
     /// ## Examples
     ///
     /// ```
-    /// use alloc_free::{FixedVec, alloc::LocalAllocLeakExt};
+    /// use without_alloc::{FixedVec, alloc::LocalAllocLeakExt};
     /// use static_alloc::Slab;
     ///
     /// let mut memory: Slab<[usize; 8]> = Slab::uninit();
@@ -681,7 +681,7 @@ impl<T> Drop for Drain<'_, T> {
 ///
 /// ```
 /// # use core::mem::MaybeUninit;
-/// # use alloc_free::FixedVec;
+/// # use without_alloc::FixedVec;
 ///
 /// let mut memory: [MaybeUninit<usize>; 15] = [MaybeUninit::uninit(); 15];
 /// let mut source = FixedVec::new((&mut memory[..]).into());

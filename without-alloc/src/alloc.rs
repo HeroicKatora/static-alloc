@@ -50,7 +50,7 @@ pub trait LocalAllocLeakExt<'alloc>: LocalAlloc<'alloc> {
     ///
     /// ```
     /// # use static_alloc::Slab;
-    /// # use alloc_free::alloc::LocalAllocLeakExt;
+    /// # use without_alloc::alloc::LocalAllocLeakExt;
     /// use core::cell::{Ref, RefCell};
     ///
     /// let slab: Slab<[Ref<'static, usize>; 1]> = Slab::uninit();
