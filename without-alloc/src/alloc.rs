@@ -49,11 +49,11 @@ pub trait LocalAllocLeakExt<'alloc>: LocalAlloc<'alloc> {
     /// ## Usage
     ///
     /// ```
-    /// # use static_alloc::Slab;
+    /// # use static_alloc::Bump;
     /// # use without_alloc::alloc::LocalAllocLeakExt;
     /// use core::cell::{Ref, RefCell};
     ///
-    /// let slab: Slab<[Ref<'static, usize>; 1]> = Slab::uninit();
+    /// let slab: Bump<[Ref<'static, usize>; 1]> = Bump::uninit();
     /// let data = RefCell::new(0xff);
     ///
     /// // We can place a `Ref` here but we did not yet.

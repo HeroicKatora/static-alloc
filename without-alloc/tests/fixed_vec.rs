@@ -1,7 +1,7 @@
 use core::mem::{self, MaybeUninit};
 use without_alloc::alloc::LocalAllocLeakExt;
 use without_alloc::{FixedVec, Uninit};
-use static_alloc::Slab;
+use static_alloc::Bump;
 
 #[test]
 fn create() {
@@ -25,7 +25,7 @@ fn create() {
     assert_eq!(vec.capacity(), 16);
 
     // This should be exactly enough to fulfill the request.
-    let slab: Slab<[usize; 16]> = Slab::uninit();
+    let slab: Bump<[usize; 16]> = Bump::uninit();
     let vec = slab.fixed_vec::<usize>(16).unwrap();
     assert_eq!(vec.len(), 0);
     assert!(vec.is_empty());
@@ -184,7 +184,7 @@ fn hashing() {
     use std::collections::HashMap;
     const KEY: &[usize] = &[0, 1, 2, 3];
     const VAL: &str = "mapped";
-    let memory: Slab<[u8; 1024]> = Slab::uninit();
+    let memory: Bump<[u8; 1024]> = Bump::uninit();
 
     let mut key = memory.fixed_vec(4).unwrap();
     assert_eq!(key.fill(KEY.iter().cloned()).len(), 0);

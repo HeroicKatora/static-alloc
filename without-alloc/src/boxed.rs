@@ -11,11 +11,11 @@ use crate::uninit::Uninit;
 /// ## Example
 ///
 /// The basic usage are allocated recursive data structures. Here is a standard example using a
-/// `Slab` with `'static` storage duration as the allocator:
+/// `Bump` with `'static` storage duration as the allocator:
 ///
 /// ```
 /// use without_alloc::{Box, alloc::LocalAllocLeakExt};
-/// use static_alloc::Slab;
+/// use static_alloc::Bump;
 ///
 /// #[derive(Debug)]
 /// enum List<T> {
@@ -23,7 +23,7 @@ use crate::uninit::Uninit;
 ///     Cons(T, Box<'static, List<T>>),
 /// }
 ///
-/// static SLAB: Slab<[u8; 1024]> = Slab::uninit();
+/// static SLAB: Bump<[u8; 1024]> = Bump::uninit();
 ///
 /// let base = SLAB.boxed(List::Nil).unwrap();
 /// let one = SLAB.boxed(List::Cons(0, base)).unwrap();
@@ -235,11 +235,11 @@ impl<T> AsMut<T> for Box<'_, T> {
 mod tests {
     use super::Box;
     use crate::alloc::LocalAllocLeakExt;
-    use static_alloc::Slab;
+    use static_alloc::Bump;
 
    #[test]
     fn leak_with_smaller_lifetime() {
-        static SLAB: Slab<[usize; 1]> = Slab::uninit();
+        static SLAB: Bump<[usize; 1]> = Bump::uninit();
         let local = 0;
 
         // Box is `'static` but variable is not.

@@ -16,9 +16,9 @@ use crate::uninit::{Uninit, UninitView};
 /// `Rc::try_unwrap(rc)` etc. .
 ///
 /// Compared to the standard library version, this will perform its own allocation. Instead, you
-/// can ask [`Slab`] to perform them or manually allocate guided by the necessary [`layout`].
+/// can ask [`Bump`] to perform them or manually allocate guided by the necessary [`layout`].
 ///
-/// [`Slab`]: ../slab/struct.Slab.html#method.rc
+/// [`Bump`]: ../slab/struct.Bump.html#method.rc
 /// [`layout`]: #method.layout
 pub struct Rc<'a, T> {
     /// Shared view on the memory of the box.
@@ -75,7 +75,7 @@ struct RcBox<T> {
 impl<'a, T> Rc<'a, T> {
     /// Constructs a new `Rc<T>`.
     ///
-    /// See also [`Slab::rc`], which encapsulates the process of allocation and construction in a
+    /// See also [`Bump::rc`], which encapsulates the process of allocation and construction in a
     /// single method call.
     ///
     /// ## Panics
@@ -86,18 +86,18 @@ impl<'a, T> Rc<'a, T> {
     /// ```
     /// use core::convert::TryInto;
     /// use without_alloc::{alloc::LocalAllocLeakExt, rc::Rc};
-    /// use static_alloc::Slab;
+    /// use static_alloc::Bump;
     ///
     /// struct Foo(u32);
     ///
-    /// let slab: Slab<[u8; 1024]> = Slab::uninit();
+    /// let slab: Bump<[u8; 1024]> = Bump::uninit();
     /// let layout = Rc::<Foo>::layout().try_into().unwrap();
     /// let memory = slab.alloc_layout(layout).unwrap();
     /// let rc = Rc::new(Foo(0), memory.uninit);
     /// ```
     ///
     /// [`Rc::layout`]: #method.layout
-    /// [`Slab::rc`]: ../slab/struct.Slab.html#method.rc
+    /// [`Bump::rc`]: ../slab/struct.Bump.html#method.rc
     pub fn new(val: T, memory: Uninit<'a, ()>) -> Self {
         assert!(memory.fits(Self::layout()), "Provided memory must fit the inner layout");
         let mut memory = memory.cast::<RcBox<T>>().unwrap();
@@ -137,7 +137,7 @@ impl<'a, T> Rc<'a, T> {
     ///
     /// ```
     /// use without_alloc::{alloc::LocalAllocLeakExt, rc::Rc};
-    /// use static_alloc::Slab;
+    /// use static_alloc::Bump;
     ///
     /// struct HotPotato;
     ///
@@ -147,7 +147,7 @@ impl<'a, T> Rc<'a, T> {
     ///     }
     /// }
     ///
-    /// let slab: Slab<[u8; 1024]> = Slab::uninit();
+    /// let slab: Bump<[u8; 1024]> = Bump::uninit();
     /// let foo = slab.rc(HotPotato).unwrap();
     ///
     /// let raw = Rc::into_raw(foo).ok().unwrap();
@@ -197,11 +197,11 @@ impl<'a, T> Rc<'a, T> {
     ///
     /// ```
     /// use without_alloc::{alloc::LocalAllocLeakExt, rc::Rc};
-    /// use static_alloc::Slab;
+    /// use static_alloc::Bump;
     ///
     /// struct Foo;
     ///
-    /// let slab: Slab<[u8; 1024]> = Slab::uninit();
+    /// let slab: Bump<[u8; 1024]> = Bump::uninit();
     /// let foo = slab.rc(Foo).unwrap();
     /// let weak = Rc::downgrade(&foo);
     ///
@@ -277,11 +277,11 @@ impl<T> Rc<'_, T> {
     ///
     /// ```
     /// use without_alloc::{alloc::LocalAllocLeakExt, rc::Rc};
-    /// use static_alloc::Slab;
+    /// use static_alloc::Bump;
     ///
     /// struct Foo;
     ///
-    /// let slab: Slab<[u8; 1024]> = Slab::uninit();
+    /// let slab: Bump<[u8; 1024]> = Bump::uninit();
     ///
     /// // Two Rc's pointing to the same data.
     /// let foo = slab.rc(Foo).unwrap();
@@ -357,11 +357,11 @@ impl<'a, T> Weak<'a, T> {
     ///
     /// ```
     /// use without_alloc::{alloc::LocalAllocLeakExt, rc::Rc};
-    /// use static_alloc::Slab;
+    /// use static_alloc::Bump;
     ///
     /// struct Foo;
     ///
-    /// let slab: Slab<[u8; 1024]> = Slab::uninit();
+    /// let slab: Bump<[u8; 1024]> = Bump::uninit();
     /// let rc = slab.rc(Foo).unwrap();
     /// let (_, weak) = Rc::try_unwrap(rc).ok().unwrap();
     ///
@@ -391,9 +391,9 @@ impl<'a, T> Weak<'a, T> {
     ///
     /// ```
     /// use without_alloc::{alloc::LocalAllocLeakExt, rc::Rc};
-    /// use static_alloc::Slab;
+    /// use static_alloc::Bump;
     ///
-    /// let memory: Slab<[u8; 1024]> = Slab::uninit();
+    /// let memory: Bump<[u8; 1024]> = Bump::uninit();
     /// let rc = memory.rc(0usize).unwrap();
     ///
     /// let weak = Rc::downgrade(&rc);
@@ -423,11 +423,11 @@ impl<T> Weak<'_, T> {
     ///
     /// ```
     /// use without_alloc::{alloc::LocalAllocLeakExt, rc::Rc, rc::Weak};
-    /// use static_alloc::Slab;
+    /// use static_alloc::Bump;
     ///
     /// struct Foo;
     ///
-    /// let slab: Slab<[u8; 1024]> = Slab::uninit();
+    /// let slab: Bump<[u8; 1024]> = Bump::uninit();
     /// let rc = slab.rc(Foo).unwrap();
     /// let (_, weak) = Rc::try_unwrap(rc).ok().unwrap();
     ///
@@ -444,11 +444,11 @@ impl<T> Weak<'_, T> {
     ///
     /// ```
     /// use without_alloc::{alloc::LocalAllocLeakExt, rc::Rc, rc::Weak};
-    /// use static_alloc::Slab;
+    /// use static_alloc::Bump;
     ///
     /// struct Foo;
     ///
-    /// let slab: Slab<[u8; 1024]> = Slab::uninit();
+    /// let slab: Bump<[u8; 1024]> = Bump::uninit();
     /// let rc = slab.rc(Foo).unwrap();
     /// let (_, weak) = Rc::try_unwrap(rc).ok().unwrap();
     ///
@@ -499,7 +499,7 @@ impl<T> Drop for Rc<'_, T> {
     ///
     /// ```
     /// use without_alloc::{alloc::LocalAllocLeakExt, rc::Rc};
-    /// use static_alloc::Slab;
+    /// use static_alloc::Bump;
     ///
     /// struct Foo;
     ///
@@ -509,7 +509,7 @@ impl<T> Drop for Rc<'_, T> {
     ///     }
     /// }
     ///
-    /// let slab: Slab<[u8; 1024]> = Slab::uninit();
+    /// let slab: Bump<[u8; 1024]> = Bump::uninit();
     ///
     /// let foo  = slab.rc(Foo).unwrap();
     /// let foo2 = Rc::clone(&foo);
@@ -548,11 +548,11 @@ impl<T> Clone for Rc<'_, T> {
     ///
     /// ```
     /// use without_alloc::{alloc::LocalAllocLeakExt, rc::Rc};
-    /// use static_alloc::Slab; 
+    /// use static_alloc::Bump; 
     ///
     /// struct Foo;
     ///
-    /// let slab: Slab<[u8; 1024]> = Slab::uninit();
+    /// let slab: Bump<[u8; 1024]> = Bump::uninit();
     ///
     /// let mut foo  = slab.rc(Foo).unwrap();
     /// assert!(Rc::get_mut(&mut foo).is_some());
@@ -584,11 +584,11 @@ impl<T> Clone for Weak<'_, T> {
     ///
     /// ```
     /// use without_alloc::{alloc::LocalAllocLeakExt, rc::Rc};
-    /// use static_alloc::Slab;
+    /// use static_alloc::Bump;
     ///
     /// struct Foo;
     ///
-    /// let slab: Slab<[u8; 1024]> = Slab::uninit();
+    /// let slab: Bump<[u8; 1024]> = Bump::uninit();
     /// let foo = slab.rc(Foo).unwrap();
     ///
     /// let (_, weak) = Rc::try_unwrap(foo).ok().unwrap();
@@ -691,7 +691,7 @@ mod tests {
     use core::cell::Cell;
 
     use super::{RcBox, Rc, Weak};
-    use static_alloc::Slab;
+    use static_alloc::Bump;
     use crate::alloc::LocalAllocLeakExt;
 
     #[test]
@@ -720,7 +720,7 @@ mod tests {
             }
         }
 
-        let slab: Slab<[u8; 1024]> = Slab::uninit();
+        let slab: Bump<[u8; 1024]> = Bump::uninit();
         let rc = slab.rc(NeverDrop).unwrap();
         rc.inc_strong();
         drop(rc);
@@ -757,7 +757,7 @@ mod tests {
 
         struct Foo(u32);
 
-        let slab: Slab<[u8; 1024]> = Slab::uninit();
+        let slab: Bump<[u8; 1024]> = Bump::uninit();
         let layout = Layout::new::<Foo>().try_into().unwrap();
         let wrong_alloc = slab.alloc_layout(layout).unwrap();
 

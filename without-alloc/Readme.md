@@ -15,10 +15,10 @@ list with static lifetime based on dynamic data. As local memory pools for
 fixed capacity `FixedVec`:
 
 ```rust
-use static_alloc::Slab;
+use static_alloc::Bump;
 use without_alloc::{FixedVec, alloc::LocalAllocLeakExt};
 
-let mut pool: Slab<[usize; 16]> = Slab::uninit();
+let mut pool: Bump<[usize; 16]> = Bump::uninit();
 // Allocate a vector with capacity of 16 from the slab.
 let mut vector = pool.fixed_vec(16).unwrap();
 
@@ -35,7 +35,7 @@ This might be handy if you want to chain boot another kernel and pass it a
 linked list describing the platform.
 
 ```rust
-use static_alloc::Slab;
+use static_alloc::Bump;
 use without_alloc::{Box, alloc::LocalAllocLeakExt};
 
 enum List {
@@ -43,7 +43,7 @@ enum List {
     Cons(u8, Box<'static, List>),
 }
 
-static SLAB: Slab<[u8; 1024]> = Slab::uninit();
+static SLAB: Bump<[u8; 1024]> = Bump::uninit();
 
 let base = SLAB.boxed(List::Nil).unwrap();
 let one = SLAB.boxed(List::Cons(0, base)).unwrap();

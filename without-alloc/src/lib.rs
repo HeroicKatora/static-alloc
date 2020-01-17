@@ -2,17 +2,17 @@
 //!
 //! The most directly useful might be a local `FixedVec` that requires its element to be neither
 //! `Clone`, `Copy` nor `Default` but is simply a normal vector on a locally borrowed chunk of raw
-//! memory. For this we will use the `Slab` allocator of [`static-alloc`] which loan us memory from
+//! memory. For this we will use the `Bump` allocator of [`static-alloc`] which loan us memory from
 //! the stack and cleans up by leaving the scope without requiring explicit deallocation. Sort of
 //! like `alloca` but safe and pretty.
 //!
 //! [`static-alloc`]: https://crates.io/crates/static-alloc
 //!
 //! ```rust
-//! use static_alloc::Slab;
+//! use static_alloc::Bump;
 //! use without_alloc::{FixedVec, alloc::LocalAllocLeakExt};
 //!
-//! let mut pool: Slab<[usize; 16]> = Slab::uninit();
+//! let mut pool: Bump<[usize; 16]> = Bump::uninit();
 //! // Allocate a vector with capacity of 16 from the slab.
 //! let mut vector = pool.fixed_vec(16).unwrap();
 //!
