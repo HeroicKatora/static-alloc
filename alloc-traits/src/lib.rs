@@ -29,9 +29,13 @@ pub use layout::{Layout, NonZeroLayout};
 
 /// A marker struct denoting a lifetime that is not simply coercible to another.
 #[derive(Clone, Copy, Default, Hash, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Invariant<'lt> {
+pub struct AllocTime<'lt> {
     marker: PhantomData<&'lt fn(&'lt ())>,
 }
+
+/// A marker struct denoting a lifetime that is not simply coercible to another.
+#[deprecated = "Use the new name 'AllocTime' instead"]
+pub type Invariant<'lt> = AllocTime<'lt>;
 
 /// An allocation valid for a particular lifetime.
 ///
@@ -44,7 +48,7 @@ pub struct Allocation<'alloc> {
     /// The allocated layout.
     pub layout: NonZeroLayout,
     /// The lifetime of the allocation.
-    pub lifetime: Invariant<'alloc>,
+    pub lifetime: AllocTime<'alloc>,
 }
 
 /// An allocator providing memory regions valid for a particular lifetime.
@@ -98,8 +102,8 @@ pub unsafe trait LocalAlloc<'alloc> {
     }
 }
 
-impl fmt::Debug for Invariant<'_> {
+impl fmt::Debug for AllocTime<'_> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.pad("Invariant")
+        f.pad("AllocTime")
     }
 }

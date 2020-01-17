@@ -10,7 +10,7 @@ use core::mem::{self, MaybeUninit};
 use core::ptr::{NonNull, null_mut};
 use core::sync::atomic::{AtomicUsize, Ordering};
 
-use alloc_traits::{Invariant, LocalAlloc, NonZeroLayout};
+use alloc_traits::{AllocTime, LocalAlloc, NonZeroLayout};
 
 /// Allocator drawing from an inner, statically sized memory resource.
 ///
@@ -238,7 +238,7 @@ pub struct Allocation<'a, T=u8> {
     pub ptr: NonNull<T>,
 
     /// The lifetime of the allocation.
-    pub lifetime: Invariant<'a>,
+    pub lifetime: AllocTime<'a>,
 
     /// The observed amount of consumed bytes after the allocation.
     pub level: Level,
@@ -502,7 +502,7 @@ impl<T> Bump<T> {
 
         Ok(Allocation {
             ptr: NonNull::new(aligned).unwrap(),
-            lifetime: Invariant::default(),
+            lifetime: AllocTime::default(),
             level: Level(new_consumed),
         })
     }
@@ -626,7 +626,7 @@ impl<T> Bump<T> {
 
         Allocation {
             ptr: NonNull::from(alloc).cast(),
-            lifetime: Invariant::default(),
+            lifetime: AllocTime::default(),
             level: self.level(),
         }
     }
@@ -717,7 +717,7 @@ unsafe impl<'alloc, T> LocalAlloc<'alloc> for Bump<T> {
         Some(alloc_traits::Allocation {
             ptr: raw_alloc.ptr,
             layout: layout,
-            lifetime: Invariant::default(),
+            lifetime: AllocTime::default(),
         })
     }
 
