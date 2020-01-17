@@ -18,7 +18,7 @@ alloc-traits = { path = "../alloc-traits", version = "0.1.0" }
 # Currently only used in a test for ensure future opportunities.
 nightly_try_reserve = []
 
-# Tests that test `Slab` as GlobalAlloc. Must be in a separate test each.
+# Tests that test `Bump` as GlobalAlloc. Must be in a separate test each.
 [[test]]
 name = "vec"
 path = "tests/vec.rs"

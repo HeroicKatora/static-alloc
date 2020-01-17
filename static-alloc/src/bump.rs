@@ -1,9 +1,9 @@
 //! The slab allocator.
 //!
 //! Basics of usage and the connection between the structs is discussed in the documentation of the
-//! [`Slab`] itself.
+//! [`Bump`] itself.
 //!
-//! [`Slab`]: struct.Slab.html
+//! [`Bump`]: struct.Bump.html
 use core::alloc::{GlobalAlloc, Layout};
 use core::cell::UnsafeCell;
 use core::mem::{self, MaybeUninit};
@@ -16,7 +16,7 @@ use alloc_traits::{Invariant, LocalAlloc, NonZeroLayout};
 ///
 /// The type parameter `T` is used only to annotate the required size and alignment of the region
 /// and has no futher use. Note that in particular there is no safe way to retrieve or unwrap an
-/// inner instance even if the `Slab` was not constructed as a shared global static. Nevertheless,
+/// inner instance even if the `Bump` was not constructed as a shared global static. Nevertheless,
 /// the choice of type makes it easier to reason about potentially required extra space due to
 /// alignment padding.
 ///
@@ -25,10 +25,10 @@ use alloc_traits::{Invariant, LocalAlloc, NonZeroLayout};
 /// You can use the stable rust attribute to use an instance of this type as the global allocator.
 ///
 /// ```rust,no_run
-/// use static_alloc::Slab;
+/// use static_alloc::Bump;
 ///
 /// #[global_allocator]
-/// static A: Slab<[u8; 1 << 16]> = Slab::uninit();
+/// static A: Bump<[u8; 1 << 16]> = Bump::uninit();
 ///
 /// fn main() { }
 /// ```
@@ -39,16 +39,16 @@ use alloc_traits::{Invariant, LocalAlloc, NonZeroLayout};
 ///
 /// ## Usage as a non-dropping local allocator
 ///
-/// It is also possible to use a `Slab` as a stack local allocator or a specialized allocator. The
+/// It is also possible to use a `Bump` as a stack local allocator or a specialized allocator. The
 /// interface offers some utilities for allocating values from references to shared or unshared
 /// instances directly. **Note**: this will never call the `Drop` implementation of the allocated
 /// type. In particular, it would almost surely not be safe to `Pin` the values, except if there is
-/// a guarantee for the `Slab` itself to not be deallocated either.
+/// a guarantee for the `Bump` itself to not be deallocated either.
 ///
 /// ```rust
-/// use static_alloc::Slab;
+/// use static_alloc::Bump;
 ///
-/// let local: Slab<[u64; 3]> = Slab::uninit();
+/// let local: Bump<[u64; 3]> = Bump::uninit();
 ///
 /// let one = local.leak(0_u64).unwrap();
 /// let two = local.leak(1_u64).unwrap();
@@ -63,20 +63,20 @@ use alloc_traits::{Invariant, LocalAlloc, NonZeroLayout};
 /// alignment requirement of 16 and it works fine on those.
 ///
 /// ```rust
-/// # use static_alloc::Slab;
+/// # use static_alloc::Bump;
 /// // Just enough space for `u128` but no alignment requirement.
-/// let local: Slab<[u8; 16]> = Slab::uninit();
+/// let local: Bump<[u8; 16]> = Bump::uninit();
 ///
 /// // May or may not return an err.
 /// let _ = local.leak(0_u128);
 /// ```
 ///
-/// Instead use the type parameter to `Slab` as a hint for the best alignment.
+/// Instead use the type parameter to `Bump` as a hint for the best alignment.
 ///
 /// ```rust
-/// # use static_alloc::Slab;
+/// # use static_alloc::Bump;
 /// // Enough space and align for `u128`.
-/// let local: Slab<[u128; 1]> = Slab::uninit();
+/// let local: Bump<[u128; 1]> = Bump::uninit();
 ///
 /// assert!(local.leak(0_u128).is_ok());
 /// ```
@@ -91,7 +91,7 @@ use alloc_traits::{Invariant, LocalAlloc, NonZeroLayout};
 ///
 /// ```
 /// use core::alloc;
-/// use static_alloc::Slab;
+/// use static_alloc::Bump;
 ///
 /// #[repr(align(4096))]
 /// struct PageTable {
@@ -111,7 +111,7 @@ use alloc_traits::{Invariant, LocalAlloc, NonZeroLayout};
 /// // program/kernel is provided as an ELF the bootloader reserves
 /// // memory for us as part of the loading process that we can use
 /// // purely for page tables. Replaces asm `paging: .BYTE <size>;`
-/// static Paging: Slab<[u8; 1 << 18]> = Slab::uninit();
+/// static Paging: Bump<[u8; 1 << 18]> = Bump::uninit();
 ///
 /// fn main() {
 ///     let layout = alloc::Layout::new::<PageTable>();
@@ -123,7 +123,7 @@ use alloc_traits::{Invariant, LocalAlloc, NonZeroLayout};
 /// ```
 ///
 /// A similar structure would of course work to allocate some non-`'static' objects from a
-/// temporary `Slab`.
+/// temporary `Bump`.
 ///
 /// ## More insights
 ///
@@ -135,7 +135,7 @@ use alloc_traits::{Invariant, LocalAlloc, NonZeroLayout};
 /// demonstrate performance gains).
 ///
 /// WIP: slices.
-pub struct Slab<T> {
+pub struct Bump<T> {
     /// An monotonic atomic counter of consumed bytes.
     ///
     /// It is only mutably accessed in `bump` which guarantees its invariants.
@@ -160,7 +160,7 @@ pub struct LeakError<T> {
 
 /// Specifies an amount of consumed space of a slab.
 ///
-/// Each allocation of the `Slab` increases the current level as they must not be empty. By
+/// Each allocation of the `Bump` increases the current level as they must not be empty. By
 /// ensuring that an allocation is performed at a specific level it is thus possible to check that
 /// multiple allocations happened in succession without other intermediate allocations. This
 /// ability in turns makes it possible to group allocations together, for example to initialize a
@@ -175,8 +175,8 @@ pub struct LeakError<T> {
 ///
 /// ```
 /// # use core::slice;
-/// # use static_alloc::slab::{Level, Slab};
-/// static SLAB: Slab<[u64; 4]> = Slab::uninit();
+/// # use static_alloc::bump::{Level, Bump};
+/// static BUMP: Bump<[u64; 4]> = Bump::uninit();
 ///
 /// /// Gathers as much data as possible.
 /// ///
@@ -187,11 +187,11 @@ pub struct LeakError<T> {
 ///         None => return &mut [],
 ///     };
 ///
-///     let mut level: Level = SLAB.level();
+///     let mut level: Level = BUMP.level();
 ///     let mut begin: *mut u64;
 ///     let mut count;
 ///
-///     match SLAB.leak_at(first, level) {
+///     match BUMP.leak_at(first, level) {
 ///         Ok((first, first_level)) => {
 ///             begin = first;
 ///             level = first_level;
@@ -201,7 +201,7 @@ pub struct LeakError<T> {
 ///     }
 ///
 ///     let _ = iter.try_for_each(|value: u64| {
-///         match SLAB.leak_at(value, level) {
+///         match BUMP.leak_at(value, level) {
 ///             Err(err) => return Err(err),
 ///             Ok((_, new_level)) => level = new_level,
 ///         };
@@ -212,7 +212,7 @@ pub struct LeakError<T> {
 ///     unsafe {
 ///         // SAFETY: all `count` allocations are contiguous, begin is well aligned and no
 ///         // reference is currently pointing at any of the values. The lifetime is `'static` as
-///         // the SLAB itself is static.
+///         // the BUMP itself is static.
 ///         slice::from_raw_parts_mut(begin, count)
 ///     }
 /// }
@@ -259,12 +259,12 @@ pub enum Failure {
     },
 }
 
-impl<T> Slab<T> {
+impl<T> Bump<T> {
     /// Make a new allocatable slab of certain byte size and alignment.
     ///
     /// The storage will contain uninitialized bytes.
     pub const fn uninit() -> Self {
-        Slab {
+        Bump {
             consumed: AtomicUsize::new(0),
             storage: UnsafeCell::new(MaybeUninit::uninit()),
         }
@@ -276,7 +276,7 @@ impl<T> Slab<T> {
     /// as a `const fn` which currently limits its potential usefulness
     /// but there is no good reason not to provide it regardless.
     pub fn zeroed() -> Self {
-        Slab {
+        Bump {
             consumed: AtomicUsize::new(0),
             storage: UnsafeCell::new(MaybeUninit::zeroed()),
         }
@@ -286,7 +286,7 @@ impl<T> Slab<T> {
     ///
     /// Note that `storage` will never be dropped and there is no way to get it back.
     pub const fn new(storage: T) -> Self {
-        Slab {
+        Bump {
             consumed: AtomicUsize::new(0),
             storage: UnsafeCell::new(MaybeUninit::new(storage)),
         }
@@ -358,10 +358,10 @@ impl<T> Slab<T> {
     /// ## Usage
     ///
     /// ```
-    /// # use static_alloc::Slab;
+    /// # use static_alloc::Bump;
     /// use core::cell::{Ref, RefCell};
     ///
-    /// let slab: Slab<[Ref<'static, usize>; 1]> = Slab::uninit();
+    /// let slab: Bump<[Ref<'static, usize>; 1]> = Bump::uninit();
     /// let data = RefCell::new(0xff);
     ///
     /// // We can place a `Ref` here but we did not yet.
@@ -509,11 +509,11 @@ impl<T> Slab<T> {
     /// The value is leaked in the sense that
     ///
     /// 1. the drop implementation of the allocated value is never called;
-    /// 2. reusing the memory for another allocation in the same `Slab` requires manual unsafe code
+    /// 2. reusing the memory for another allocation in the same `Bump` requires manual unsafe code
     ///    to handle dropping and reinitialization.
     ///
     /// However, it does not mean that the underlying memory used for the allocated value is never
-    /// reclaimed. If the `Slab` itself is a stack value then it will get reclaimed together with
+    /// reclaimed. If the `Bump` itself is a stack value then it will get reclaimed together with
     /// it.
     ///
     /// ## Safety notice
@@ -524,14 +524,14 @@ impl<T> Slab<T> {
     /// as [`ManuallyDrop::drop`].
     ///
     /// ```
-    /// # use static_alloc::Slab;
+    /// # use static_alloc::Bump;
     /// #[derive(Debug, Default)]
     /// struct FooBar {
     ///     // ...
     /// # _private: [u8; 1],
     /// }
     ///
-    /// let local: Slab<[FooBar; 3]> = Slab::uninit();
+    /// let local: Bump<[FooBar; 3]> = Bump::uninit();
     /// let one = local.leak(FooBar::default()).unwrap();
     ///
     /// // Dangerous but justifiable.
@@ -544,9 +544,9 @@ impl<T> Slab<T> {
     /// ## Usage
     ///
     /// ```
-    /// use static_alloc::Slab;
+    /// use static_alloc::Bump;
     ///
-    /// let local: Slab<[u64; 3]> = Slab::uninit();
+    /// let local: Bump<[u64; 3]> = Bump::uninit();
     ///
     /// let one = local.leak(0_u64).unwrap();
     /// assert_eq!(*one, 0);
@@ -585,9 +585,9 @@ impl<T> Slab<T> {
     /// ## Usage
     ///
     /// ```
-    /// use static_alloc::Slab;
+    /// use static_alloc::Bump;
     ///
-    /// let local: Slab<[u64; 3]> = Slab::uninit();
+    /// let local: Bump<[u64; 3]> = Bump::uninit();
     ///
     /// let base = local.level();
     /// let (one, level) = local.leak_at(1_u64, base).unwrap();
@@ -666,9 +666,9 @@ impl<'alloc, T> Allocation<'alloc, T> {
     ///
     /// ## Usage
     ///
-    /// Consider the alternative [`Slab::leak`] to safely allocate and directly leak a value.
+    /// Consider the alternative [`Bump::leak`] to safely allocate and directly leak a value.
     ///
-    /// [`Slab::leak`]: struct.Slab.html#method.leak
+    /// [`Bump::leak`]: struct.Bump.html#method.leak
     pub unsafe fn leak(self, val: T) -> &'alloc mut T {
         core::ptr::write(self.ptr.as_ptr(), val);
         &mut *self.ptr.as_ptr()
@@ -692,11 +692,11 @@ impl<T> LeakError<T> {
 }
 
 // SAFETY: at most one thread gets a pointer to each chunk of data.
-unsafe impl<T> Sync for Slab<T> { }
+unsafe impl<T> Sync for Bump<T> { }
 
-unsafe impl<T> GlobalAlloc for Slab<T> {
+unsafe impl<T> GlobalAlloc for Bump<T> {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        Slab::alloc(self, layout)
+        Bump::alloc(self, layout)
             .map(NonNull::as_ptr)
             .unwrap_or_else(null_mut)
     }
@@ -706,11 +706,11 @@ unsafe impl<T> GlobalAlloc for Slab<T> {
     }
 }
 
-unsafe impl<'alloc, T> LocalAlloc<'alloc> for Slab<T> {
+unsafe impl<'alloc, T> LocalAlloc<'alloc> for Bump<T> {
     fn alloc(&'alloc self, layout: NonZeroLayout)
         -> Option<alloc_traits::Allocation<'alloc>>
     {
-        let raw_alloc = Slab::get_layout(self, layout.into())?;
+        let raw_alloc = Bump::get_layout(self, layout.into())?;
         Some(alloc_traits::Allocation {
             ptr: raw_alloc.ptr,
             layout: layout,
@@ -738,7 +738,7 @@ mod tests {
             }
         }
 
-        let alloc = Slab::<()>::uninit();
+        let alloc = Bump::<()>::uninit();
         let _ = alloc.leak(PanicOnDrop).unwrap();
     }
 }
