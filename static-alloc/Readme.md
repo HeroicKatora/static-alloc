@@ -5,20 +5,14 @@
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](https://raw.githubusercontent.com/HeroicKatora/static-alloc/LICENSE)
 [![CI Status](https://api.cirrus-ci.com/github/HeroicKatora/static-alloc.svg)](https://cirrus-ci.com/github/HeroicKatora/static-alloc)
 
-Replacements for `alloc` that do not perform any allocation themselves.
+General purpose global allocator(s) with static, inline storage.
 
 ## Goal and Target Platform
 
-Provides allocator based data structures for extremely resource constrained
-environments where the only memory guaranteed is your program's image in memory
-as provided by the loader. This includes `Box`, `Rc`, a `FixedVec`, and a `Bump`
-allocator to create the structures.
-
-This library aims to provide functionality similar to the standard `alloc`
-crate. It is obviously far from complete, and contributions with bug fixes or
-more allocators are welcome. As a general principle those should provide
-mechanisms, not policy, have a usable direct api that does not require them to
-override any singleton such as the single global allocator.
+Provides an allocator for extremely resource constrained environments where the
+only memory guaranteed is your program's image in memory as provided by the
+loader. Possible use cases are OS-less development, embedded, bootloaders (even
+stage0/1 maybe, totally untested).
 
 Possible use cases are OS-less development, embedded, bootloaders (even
 stage0/1 maybe, totally untested). The primary goals are similar to the
@@ -26,7 +20,7 @@ standard library simplicity, and correctness, and minimal assumptions.
 
 ## Usage
 
-As a global allocator for `alloc`:
+As a global allocator for `alloc` with some safe allocation extensions:
 
 ```rust
 use static_alloc::Bump;
@@ -44,6 +38,26 @@ fn main() {
     buffer.copy_from_slice(&v);
 }
 ```
+
+You can also use it as a local allocator creating dynamic values on the stack.
+In this case you might want to be more conservative with resource usage so as
+not to blow the stack. The benefit is even larger using it together with
+[`without-alloc`] which provides high-level data structures that you are used
+to from `alloc`.
+
+```rust
+use static_alloc::Bump;
+
+fn main() {
+    for _ in 0..100 {
+        let local: Bump<[u8; 32]> = Bump::uninit();
+        let temp_buffer = local.leak([0; 32]);
+	// Resources are cleaned up.
+    }
+}
+```
+
+[`without-alloc`]: https://crates.io/crates/without-alloc/
 
 ## Contributing
 

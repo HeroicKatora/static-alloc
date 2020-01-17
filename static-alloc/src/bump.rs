@@ -1,4 +1,4 @@
-//! The slab allocator.
+//! The bump allocator.
 //!
 //! Basics of usage and the connection between the structs is discussed in the documentation of the
 //! [`Bump`] itself.
@@ -19,6 +19,9 @@ use alloc_traits::{Invariant, LocalAlloc, NonZeroLayout};
 /// inner instance even if the `Bump` was not constructed as a shared global static. Nevertheless,
 /// the choice of type makes it easier to reason about potentially required extra space due to
 /// alignment padding.
+///
+/// This type is *always* `Sync` to allow creating `static` instances. This works only because
+/// there is no actual instance of `T` contained inside.
 ///
 /// ## Usage as global allocator
 ///
