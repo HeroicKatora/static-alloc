@@ -1,3 +1,7 @@
+# v0.2.1
+
+- Fixed the documentation to refer to `without-alloc`
+
 # v0.2.0
 
 Remodeled the crate into independent subcrates
