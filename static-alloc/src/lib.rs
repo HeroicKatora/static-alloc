@@ -32,8 +32,8 @@
 #![no_std]
 #![deny(missing_docs)]
 
-pub mod slab;
-pub use slab::Slab;
+pub mod bump;
+pub use bump::Slab;
 
 // Can't use the macro-call itself within the `doc` attribute. So force it to eval it as part of
 // the macro invocation.
