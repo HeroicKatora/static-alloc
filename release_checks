@@ -3,12 +3,16 @@ determine_new_version() {
 	grep "version = " Cargo.toml | sed -Ee 's/version = "(.*)"/\1/' | head -1
 }
 
-check_notexists_version() {
+check_published_version() {
 	cirrus_agent="${CIRRUS_CI/?*/(Cirrus-CI)}"
 	final_agent="Release-Script/1.0 ${cirrus_agent:-(local)} (for $crate) (author:HeroicKatora)"
 	echo $final_agent
 	# Does the api information start with: '{"errors":'
-	[[ $(wget -U "$final_agent" --content-on-error "https://crates.io/api/v1/crates/$crate/$new_version" -qO -) == "{\"errors\":"* ]]
+	[[ $(wget -U "$final_agent" --content-on-error "https://crates.io/api/v1/crates/$crate/$new_version" -qO -) == "{\"errors\":"* ]] || {
+		published_commit=$(wget -U "$final_agent" "https://crates.io/api/v1/crates/$crate/$new_version/download" -qO - | tar xOzf - "$crate-$new_version/.cargo_vcs_info.json")
+		published_commit=$(sed 's/\"sha1\": \"\(.*\)\"/\1/;T0;p;:0;d' <<< "$published_commit")
+		echo "Already published at" "$published_commit"
+	}
 }
 
 git_considered_clean() {
@@ -25,12 +29,23 @@ check_release_changes() {
 }
 
 make_git_tag() {
+	tag_edit_msg="../.git/TAG_MSG_$(uuidgen)"
+	touch "$tag_edit_msg"
+	function cleanup() {
+		rm "$tag_edit_msg"
+	}
+	trap cleanup EXIT
 	# Extract the verion specific section from Changes.md
 	#   Delete lines until $new_version header
 	#   Delete lines starting from the next header
 	#   Delete all empty lines at the start
 	# Use as the initial message for a signed tag, but open edit anyways
-	sed -e '1,/'"$new_version"'/d;/\#/,$d;/./,$!d' Changes.md | git tag -s $is_force -F - -e "v$new_version"
+	echo $(pwd)
+	sed -e '0,/'"$new_version"'/d;/\#/,$d;/./,$!d' Changes.md >> "$tag_edit_msg"
+	echo >> "$tag_edit_msg"
+	# Sign the package content by including its hash in the tag
+	sha256sum "../target/package/${crate}-${new_version}.crate" >> "$tag_edit_msg"
+	git tag -s -F "$tag_edit_msg" -e "${crate}-v${new_version}" $published_commit
 }
 
 is_force=""
@@ -60,7 +75,7 @@ exit 1; } ;;
 done
 
 [[ -z "$param" ]] && { echo "Provide a crate as parameter"; exit 1; }
-cd $crate
+cd "$crate"
 
 new_version="$(determine_new_version)"
 
@@ -83,7 +98,7 @@ if [[ -f Contributors.txt ]]; then
 	fi
 fi
 
-check_notexists_version || { echo "Version $new_version appears already published"; exit 1; }
+check_published_version || { echo "Version $new_version appears already published"; exit 1; }
 
 # Check there are no more [WIP] markers in Migrate and Readme
 count_wip_marker || { echo "Fail: Work in progress in documentation"; exit 1; }
