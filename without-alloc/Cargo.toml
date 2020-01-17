@@ -4,6 +4,7 @@ version = "0.2.0"
 description = "Replacements for `Box`, `Rc`, `Vec`, .. without `alloc`"
 authors = ["Andreas Molzer <andreas.molzer@gmx.de>"]
 edition = "2018"
+license = "MIT"
 documentation = "https://docs.rs/without-alloc"
 repository = "https://github.com/HeroicKatora/alloc-free"
 readme = "Readme.md"
