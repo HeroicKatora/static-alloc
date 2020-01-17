@@ -34,7 +34,7 @@ use crate::uninit::Uninit;
 /// }
 /// ```
 ///
-/// ## With `Slab`
+/// ## With `Bump`
 ///
 /// One focus of the library is composability. It should not be surprising that `FixedVec`
 /// interacts with the [`LocalAlloc`] allocators, which implements a specialized interface
@@ -42,10 +42,10 @@ use crate::uninit::Uninit;
 /// the `FixedVec` can use this instead of its own local stack variables.
 ///
 /// ```
-/// use static_alloc::Slab;
+/// use static_alloc::Bump;
 /// use without_alloc::{FixedVec, alloc::LocalAllocLeakExt};
 ///
-/// let alloc: Slab<[u8; 1 << 12]> = Slab::uninit();
+/// let alloc: Bump<[u8; 1 << 12]> = Bump::uninit();
 /// let some_usize = alloc.leak(0_usize).unwrap();
 ///
 /// // Allocate a vector with capacity `1` from the slab.
@@ -85,7 +85,7 @@ use crate::uninit::Uninit;
 /// let mut vec: FixedVec<MyStruct> = FixedVec::from_unaligned(uninit);
 /// ```
 ///
-/// [`Slab`]: ../slab/struct.Slab.html
+/// [`Bump`]: ../slab/struct.Bump.html
 /// [`Uninit`]: ../uninit/struct.Uninit.html
 /// [`new`]: #method.new
 /// [`from_unaligned`]: #method.from_unaligned
@@ -286,9 +286,9 @@ impl<T> FixedVec<'_, T> {
     ///
     /// ```
     /// use without_alloc::{FixedVec, alloc::LocalAllocLeakExt};
-    /// use static_alloc::Slab;
+    /// use static_alloc::Bump;
     ///
-    /// let mut memory: Slab<[usize; 8]> = Slab::uninit();
+    /// let mut memory: Bump<[usize; 8]> = Bump::uninit();
     /// let mut vec = memory.fixed_vec::<usize>(8).unwrap();
     /// vec.fill(0..7);
     ///

@@ -1,10 +1,10 @@
 use core::num::NonZeroU16;
 
-use static_alloc::{Slab, slab};
+use static_alloc::Bump;
 
 #[test]
 fn homogeneous() {
-    let slab = Slab::<[u64; 3]>::uninit();
+    let slab = Bump::<[u64; 3]>::uninit();
 
     let new_zero = slab.leak(0_u64).unwrap();
     assert_eq!(*new_zero, 0);
@@ -24,7 +24,7 @@ fn homogeneous() {
 #[test]
 fn heterogeneous() {
     // Avoids additional space usage from alignments: all 3 values fit for an aligned `u16`.
-    let slab = Slab::<[u16; 3]>::uninit();
+    let slab = Bump::<[u16; 3]>::uninit();
 
     let intu16: &mut u16 = slab.leak(0).unwrap();
     assert_eq!(*intu16, 0);
@@ -40,7 +40,7 @@ fn heterogeneous() {
 
 #[test]
 fn zst() {
-    let slab = Slab::<()>::uninit();
+    let slab = Bump::<()>::uninit();
 
     slab.leak::<()>(())
         .expect("Could 'allocate' zst in no space");
@@ -48,7 +48,7 @@ fn zst() {
 
 #[test]
 fn level() {
-    let slab = Slab::<[u16; 2]>::uninit();
+    let slab = Bump::<[u16; 2]>::uninit();
     let init = slab.level();
 
     let (intu16, level) = slab.leak_at(0u16, init).unwrap();
@@ -58,7 +58,7 @@ fn level() {
 
     // Can not get the same level again.
     assert_eq!(slab.leak_at(0u16, init).unwrap_err().kind(),
-        slab::Failure::Mismatch { observed: level });
+        static_alloc::bump::Failure::Mismatch { observed: level });
 
     let (othu16, next) = slab.leak_at(10u16, level).unwrap();
     assert_eq!(*othu16, 10);

@@ -2,11 +2,11 @@ use core::mem;
 use core::convert::TryInto;
 use without_alloc::alloc::LocalAllocLeakExt;
 use without_alloc::rc;
-use static_alloc::Slab;
+use static_alloc::Bump;
 
 #[test]
 fn create() {
-    let memory: Slab<[u8; 1024]> = Slab::uninit();
+    let memory: Bump<[u8; 1024]> = Bump::uninit();
 
     let rc = memory.rc(0usize).unwrap();
     assert_eq!(rc::Rc::strong_count(&rc), 1);
@@ -34,7 +34,7 @@ fn reference_juggling() {
         }
     }
 
-    let memory: Slab<[u8; 1024]> = Slab::uninit();
+    let memory: Bump<[u8; 1024]> = Bump::uninit();
     let layout = rc::Rc::<HotPotato>::layout().try_into().unwrap();
     let alloc = LocalAllocLeakExt::alloc_layout(&memory, layout).unwrap();
     let ptr = alloc.uninit.as_non_null();
@@ -66,7 +66,7 @@ fn reference_juggling() {
 
 #[test]
 fn raw_and_back() {
-    let memory: Slab<[u8; 1024]> = Slab::uninit();
+    let memory: Bump<[u8; 1024]> = Bump::uninit();
 
     let rc = memory.rc(0usize).unwrap();
     assert_eq!(rc::Rc::strong_count(&rc), 1);
@@ -81,7 +81,7 @@ fn raw_and_back() {
 
 #[test]
 fn downgrade_upgrade() {
-    let memory: Slab<[u8; 1024]> = Slab::uninit();
+    let memory: Bump<[u8; 1024]> = Bump::uninit();
 
     let rc = memory.rc(0usize).unwrap();
     assert_eq!(rc::Rc::strong_count(&rc), 1);
@@ -105,7 +105,7 @@ fn downgrade_upgrade() {
 #[test]
 fn compares() {
     use std::cmp::PartialEq;
-    let memory: Slab<[u8; 1024]> = Slab::uninit();
+    let memory: Bump<[u8; 1024]> = Bump::uninit();
 
     let zero = memory.rc(0usize).unwrap();
     let one = memory.rc(1usize).unwrap();
@@ -126,7 +126,7 @@ fn hashing() {
     use std::collections::HashMap;
     const KEY: usize = 0xdeadbeef;
     const VAL: &str = "mapped";
-    let memory: Slab<[u8; 1024]> = Slab::uninit();
+    let memory: Bump<[u8; 1024]> = Bump::uninit();
 
     let value = memory.rc(KEY).unwrap();
     let map = Some((value, VAL))

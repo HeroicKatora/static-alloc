@@ -7,10 +7,10 @@
 //! ## Usage
 //!
 //! ```rust
-//! use static_alloc::Slab;
+//! use static_alloc::Bump;
 //!
 //! #[global_allocator]
-//! static A: Slab<[u8; 1 << 16]> = Slab::uninit();
+//! static A: Bump<[u8; 1 << 16]> = Bump::uninit();
 //!
 //! fn main() {
 //!     let v = vec![0xdeadbeef_u32; 128];
@@ -32,8 +32,8 @@
 #![no_std]
 #![deny(missing_docs)]
 
-pub mod slab;
-pub use slab::Slab;
+pub mod bump;
+pub use bump::Bump;
 
 // Can't use the macro-call itself within the `doc` attribute. So force it to eval it as part of
 // the macro invocation.

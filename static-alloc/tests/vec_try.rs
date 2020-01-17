@@ -1,9 +1,9 @@
 #![feature(try_reserve)]
 
-use static_alloc::Slab;
+use static_alloc::Bump;
 
 #[global_allocator]
-static A: Slab<[u8; 1 << 16]> = Slab::uninit();
+static A: Bump<[u8; 1 << 16]> = Bump::uninit();
 
 #[test]
 fn vec_fail_reserve() {

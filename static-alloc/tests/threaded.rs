@@ -1,14 +1,14 @@
-use static_alloc::Slab;
+use static_alloc::Bump;
 use std::thread;
 
 #[test]
 fn each_thread_one() {
     const COUNT: usize = 10;
     // Static but not the global allocator.
-    static SLAB: Slab<[u64; COUNT]> = Slab::uninit();
+    static BUMP: Bump<[u64; COUNT]> = Bump::uninit();
 
     let threads = (0..COUNT).map(|i| thread::spawn(move || {
-        SLAB.leak(i).unwrap();
+        BUMP.leak(i).unwrap();
     })).collect::<Vec<_>>();
 
     threads
@@ -17,5 +17,5 @@ fn each_thread_one() {
         .expect("No thread failed to allocate");
 
     // But now no more left.
-    assert!(SLAB.leak(0).is_err());
+    assert!(BUMP.leak(0).is_err());
 }

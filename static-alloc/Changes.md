@@ -29,7 +29,7 @@ Remodeled the crate into independent subcrates
 
 - Introduces `Rc`, a reference counter owned value.
 - Improves `FixedVec` by adding many standard trait impls.
-- Added `Slab` methods: `rc` and `fixed_vec` to create respective containers.
+- Added `Bump` methods: `rc` and `fixed_vec` to create respective containers.
 - Added `FixedVec` methods: `truncate` and `clear`.
 - Added `Uninit::fits` to test if a `cast` would succeed without performing it.
 
@@ -55,13 +55,13 @@ Remodeled the crate into independent subcrates
 
 ## v0.0.3
 
-- Added `Slab::leak`, a new interface to directly allocate values. Avoid
-  requiring `Box` and `Box::leak` from `alloc` and allows usage a `Slab` with
+- Added `Bump::leak`, a new interface to directly allocate values. Avoid
+  requiring `Box` and `Box::leak` from `alloc` and allows usage a `Bump` with
   limited lifetime such as on the stack.
 
 ## v0.0.2
 
-- `Slab::take` has been renamed to `Slab::alloc`.
+- `Bump::take` has been renamed to `Bump::alloc`.
 - Added `uninit` and `zeroed` constructors as available for `MaybeUninit`
 - Made the `new` constructor safe as no uninitialized bytes are read
 - The nightly `try_reserve` feature is now called `nightly_try_reserve`

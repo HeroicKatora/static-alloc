@@ -11,7 +11,7 @@ Replacements for `alloc` that do not perform any allocation themselves.
 
 Provides allocator based data structures for extremely resource constrained
 environments where the only memory guaranteed is your program's image in memory
-as provided by the loader. This includes `Box`, `Rc`, a `FixedVec`, and a `Slab`
+as provided by the loader. This includes `Box`, `Rc`, a `FixedVec`, and a `Bump`
 allocator to create the structures.
 
 This library aims to provide functionality similar to the standard `alloc`
@@ -29,10 +29,10 @@ standard library simplicity, and correctness, and minimal assumptions.
 As a global allocator for `alloc`:
 
 ```rust
-use static_alloc::Slab;
+use static_alloc::Bump;
 
 #[global_allocator]
-static A: Slab<[u8; 1 << 16]> = Slab::uninit();
+static A: Bump<[u8; 1 << 16]> = Bump::uninit();
 
 fn main() {
     // Vec occupying `1 << 7` bytes

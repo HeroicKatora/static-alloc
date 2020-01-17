@@ -1,6 +1,6 @@
 use without_alloc::alloc::LocalAllocLeakExt;
 use without_alloc::boxed::Box;
-use static_alloc::Slab;
+use static_alloc::Bump;
 
 #[test]
 fn recursive() {
@@ -18,7 +18,7 @@ fn recursive() {
         }
     }
 
-    let slab: Slab<[usize; 32]> = Slab::uninit();
+    let slab: Bump<[usize; 32]> = Bump::uninit();
     let mut list = slab.boxed(List::Nil).unwrap();
 
     for i in 0usize..8 {

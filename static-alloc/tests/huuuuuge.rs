@@ -1,9 +1,9 @@
-use static_alloc::Slab;
+use static_alloc::Bump;
 
 // That's 1 GB. Only rustc/llvm chokes, the `elf` binary itself does not grow. It is up to the
 // loader to actually provide that data to our program.
 #[global_allocator]
-static OMG: Slab<[u8; 1 << 30]> = Slab::uninit();
+static OMG: Bump<[u8; 1 << 30]> = Bump::uninit();
 
 #[test]
 fn ok_vec() {

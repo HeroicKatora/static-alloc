@@ -1,7 +1,7 @@
-use static_alloc::Slab;
+use static_alloc::Bump;
 
 #[global_allocator]
-static A: Slab<[u8; 1 << 20]> = Slab::uninit();
+static A: Bump<[u8; 1 << 20]> = Bump::uninit();
 
 #[test]
 fn ok_vec() {
