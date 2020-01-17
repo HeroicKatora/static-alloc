@@ -39,6 +39,26 @@ fn main() {
 }
 ```
 
+You can also use it as a local allocator creating dynamic values on the stack.
+In this case you might want to be more conservative with resource usage so as
+not to blow the stack. The benefit is even larger using it together with
+[`without-alloc`] which provides high-level data structures that you are used
+to from `alloc`.
+
+```rust
+use static_alloc::Bump;
+
+fn main() {
+    for _ in 0..100 {
+        let local: Bump<[u8; 32]> = Bump::uninit();
+        let temp_buffer = local.leak([0; 32]);
+	// Resources are cleaned up.
+    }
+}
+```
+
+[`without-alloc`]: https://crates.io/crates/without-alloc/
+
 ## Contributing
 
 PRs introducing more tests or documentation are very welcome! Whatever else
