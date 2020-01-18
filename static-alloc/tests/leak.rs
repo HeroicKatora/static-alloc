@@ -66,3 +66,12 @@ fn level() {
     assert!(level < next);
     assert_eq!(slab.level(), next);
 }
+
+#[test]
+fn slices() {
+    const DATA: &[u16] = &[0, 1];
+    let slab = Bump::<[u16; 4]>::uninit();
+
+    let mut_copy = slab.leak_copy_of_slice(DATA).unwrap();
+    assert_eq!(DATA, mut_copy);
+}

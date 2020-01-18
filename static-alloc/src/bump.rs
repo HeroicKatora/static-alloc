@@ -558,11 +558,11 @@ impl<T> Bump<T> {
     ///
     /// ## Limitations
     ///
-    /// Only sized values can be allocated in this manner for now, unsized values are blocked on
-    /// stabilization of [`ptr::slice_from_raw_parts`]. We can not otherwise get a fat pointer to
-    /// the allocated region.
+    /// Only sized values can be allocated with this methods, see [`leak_copy_of_slice`] for some
+    /// support for slices. It is not currently supported to get a generic fat pointer to the
+    /// allocated region.
     ///
-    /// [`ptr::slice_from_raw_parts`]: https://github.com/rust-lang/rust/issues/36925
+    /// [`leak_copy_of_slice`]: #method.leak_copy_of_slice
     /// [`ManuallyDrop::drop`]: https://doc.rust-lang.org/beta/std/mem/struct.ManuallyDrop.html#method.drop
     pub fn leak<V>(&self, val: V) -> Result<&mut V, LeakError<V>> {
         match self.get::<V>() {
@@ -576,7 +576,7 @@ impl<T> Bump<T> {
     ///
     /// See [`leak`] for basics on allocation of values.
     ///
-    /// The level is an identifer for a base location (more at [`level`]). This will succeed if it
+    /// The level is an identifier for a base location (more at [`level`]). This will succeed if it
     /// can be allocate exactly at the expected location.
     ///
     /// This method will return the new level of the slab allocator. A next allocation at the
@@ -614,6 +614,82 @@ impl<T> Bump<T> {
         let level = alloc.level;
         let mutref = unsafe { alloc.leak(val) };
         Ok((mutref, level))
+    }
+
+    /// Allocate a copy of a slice.
+    ///
+    /// See [`leak`] for basics on allocation of values. Note that this method requires the
+    /// allocated elements to not have any `Drop` effects.
+    ///
+    /// ## Safety notice
+    ///
+    /// See [`leak`]. Be careful with reusing the allocation for the whole lifetime of the returned
+    /// reference unless it has never been exposed to other code.
+    ///
+    /// ## Usage
+    ///
+    /// You can use the allocator to get a mutable slice of some template that is defined in a
+    /// static. The template might be a single shared instance for several users and the final data
+    /// requires some dynamic modification. For example, a web server that only support short
+    /// responses. Note that the date has a fixed length and thus can be allocated and corrected
+    /// later. The remaining space in the allocator might be used for associated data that needs
+    /// guaranteed locality for latency guarantees.
+    ///
+    /// ```rust
+    /// use static_alloc::Bump;
+    /// const RESPONSE: &[u8] = b"HTTP/1.1 200 OK\r\n\
+    ///     Server: MyWebFramework\r\n\
+    ///     Content-Type: text/plain\r\n\
+    ///     Content-Length: 13\r\n\
+    ///     Date: Wed, 17 Apr 2013 12:00:00 GMT\r\n\
+    ///     \r\n\
+    ///     Hello, World!";
+    ///
+    /// let local: Bump<[u8; 1024]> = Bump::uninit();
+    /// let answer = local.leak_copy_of_slice(RESPONSE).unwrap();
+    /// ```
+    ///
+    /// [`leak`]: #method.leak
+    pub fn leak_copy_of_slice<V>(&self, val: &[V])
+        -> Option<&mut [V]>
+    where
+        V: Copy,
+    {
+        let layout = Layout::for_value(val);
+        let alloc = self.get_layout(layout)?;
+        Some(unsafe {
+            // SAFETY: Just allocated this for `val`.
+            alloc.cast::<V>().leak_copy_of_slice(val)
+        })
+    }
+
+    /// Allocate a copy of a slice with a precise location.
+    ///
+    /// See [`leak`] for basics on allocation of values and [`leak_copy_of_slice`] for slice copies
+    /// in particular.
+    ///
+    /// The level is an identifier for a base location (more at [`level`]). This will succeed if it
+    /// can be allocate exactly at the expected location.
+    ///
+    /// This method will return the new level of the slab allocator. A next allocation at the
+    /// returned level will be placed next to this allocation, only separated by necessary padding
+    /// from alignment. In particular, this would match the location of the next element in a
+    /// larger slice.
+    ///
+    /// [`leak`]: #method.leak
+    /// [`leak_copy_of_slice`]: #method.leak_copy_of_slice
+    /// [`level`]: #method.level
+    pub fn leak_copy_of_slice_at<V>(&self, val: &[V], level: Level)
+        -> Result<&mut [V], Failure>
+    where
+        V: Copy,
+    {
+        let layout = Layout::for_value(val);
+        let alloc = self.get_layout_at(layout, level)?;
+        Ok(unsafe {
+            // SAFETY: Just allocated this for `val`.
+            alloc.cast::<V>().leak_copy_of_slice(val)
+        })
     }
 
     /// 'Allocate' a ZST.
@@ -675,6 +751,29 @@ impl<'alloc, T> Allocation<'alloc, T> {
     pub unsafe fn leak(self, val: T) -> &'alloc mut T {
         core::ptr::write(self.ptr.as_ptr(), val);
         &mut *self.ptr.as_ptr()
+    }
+
+    fn cast<V>(self) -> Allocation<'alloc, V> {
+        Allocation {
+            ptr: self.ptr.cast::<V>(),
+            lifetime: self.lifetime,
+            level: self.level,
+        }
+    }
+
+    /// Copy a slice into the allocation and leak it.
+    ///
+    /// ## Safety
+    /// Must have been allocated for a layout that fits the layout of `val` previously.
+    unsafe fn leak_copy_of_slice(self, val: &[T]) -> &'alloc mut [T] {
+        let typed_ptr = self.ptr.as_ptr();
+        // SAFETY: valid for the layout of `val` which we copy right here.
+        typed_ptr.copy_from(val.as_ptr(), val.len());
+        // SAFETY:
+        // * non null as per allocation.
+        // * has the layout and content of `val`
+        // * has the length of the valid `val`
+        core::slice::from_raw_parts_mut(typed_ptr, val.len())
     }
 }
 

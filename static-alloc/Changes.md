@@ -1,3 +1,8 @@
+# v0.2.2
+
+- Added allocation of copied slices, a first simple unsized value type. [WIP]
+- A specialized interface to incrementally allocate slices [WIP].
+
 # v0.2.1
 
 - Fixed the documentation to refer to `without-alloc`
