@@ -21,6 +21,11 @@ impl Layout {
         Layout(alloc::Layout::new::<T>())
     }
 
+    /// Create a layout for a value.
+    pub fn for_value<T: ?Sized>(val: &T) -> Self {
+        Layout(alloc::Layout::for_value(val))
+    }
+
     /// Return the size of the layout.
     pub fn size(&self) -> usize {
         self.0.size()
@@ -39,6 +44,14 @@ impl NonZeroLayout {
     /// returns `None`.
     pub fn new<T>() -> Option<Self> {
         Self::from_layout(Layout::new::<T>())
+    }
+
+    /// Create the layout for a value.
+    ///
+    /// This succeeds exactly if the type is not a zero-sized type. Otherwise this constructor
+    /// returns `None`.
+    pub fn for_value<T: ?Sized>(val: &T) -> Option<Self> {
+        Self::from_layout(Layout::for_value(val))
     }
 
     /// Creates a non-empty layout if the given layout is not empty.
