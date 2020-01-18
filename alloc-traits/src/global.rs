@@ -1,5 +1,5 @@
 use core::ptr::NonNull;
-use super::{Allocation, Invariant, NonZeroLayout};
+use super::{Allocation, AllocTime, NonZeroLayout};
 
 pub struct Global;
 
@@ -53,6 +53,6 @@ fn from_global_ptr<'any>(ptr: *mut u8, layout: NonZeroLayout) -> Option<Allocati
     Some(Allocation {
         ptr,
         layout: layout,
-        lifetime: Invariant::default(),
+        lifetime: AllocTime::default(),
     })
 }
