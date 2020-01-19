@@ -33,3 +33,6 @@ name = "huuuuuge"
 path = "tests/alloc/huuuuuge.rs"
 # Disabled because it chokes rustc. Just a PoC.
 required-features = ["DISABLED"]
+
+[package.metadata.docs.rs]
+all-features = true

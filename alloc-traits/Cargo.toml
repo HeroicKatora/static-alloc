@@ -14,3 +14,6 @@ categories = ["embedded", "memory-management", "no-std"]
 name = "alloc_traits"
 
 [dependencies]
+
+[package.metadata.docs.rs]
+all-features = true
