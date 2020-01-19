@@ -83,10 +83,10 @@ pub trait Fill<T> {
 #[cfg(feature = "alloc")]
 /// Fills the vector as far as possible without reallocating.
 impl<T> Fill<T> for alloc::vec::Vec<T> {
-    fn fill<I>(&mut self, iter: I) -> I::IntoIter
+    fn fill<I>(&mut self, iter: I)
         where I: IntoIterator<Item=T>
     {
-        for item in iter.take(self.capacity() - self.len()) {
+        for item in iter.into_iter().take(self.capacity() - self.len()) {
             self.push(item);
         }
     }
@@ -95,10 +95,10 @@ impl<T> Fill<T> for alloc::vec::Vec<T> {
 #[cfg(feature = "alloc")]
 /// Fills the queue as far as possible without reallocating.
 impl<T> Fill<T> for alloc::collections::VecDeque<T> {
-    fn fill<I>(&mut self, iter: I) -> I::IntoIter
+    fn fill<I>(&mut self, iter: I)
         where I: IntoIterator<Item=T>
     {
-        for item in iter.take(self.capacity() - self.len()) {
+        for item in iter.into_iter().take(self.capacity() - self.len()) {
             self.push_back(item);
         }
     }
