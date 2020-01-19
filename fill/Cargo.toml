@@ -8,13 +8,15 @@ license = "MIT"
 documentation = "https://docs.rs/fill"
 repository = "https://github.com/HeroicKatora/static-alloc"
 readme = "Readme.md"
-categories = ["embedded", "no-std"]
+keywords = ["fill", "extend", "no-std", "no_std"]
+categories = ["embedded", "no-std", "data-structures"]
 
 [dependencies]
 # None.
 
 [features]
 default = []
+
 # Provide implementations for types in `alloc`
 alloc = []
 
@@ -22,3 +24,6 @@ alloc = []
 name = "alloc"
 path = "tests/alloc.rs"
 required-features = ["alloc"]
+
+[package.metadata.docs.rs]
+all-features = "true"
