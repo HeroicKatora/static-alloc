@@ -606,14 +606,6 @@ impl<T> Extender<'_, T> {
 }
 
 impl VecLength<'_> {
-    fn get(&self) -> usize {
-        *self.do_not_touch_directly
-    }
-
-    unsafe fn set_len(&mut self, len: usize) {
-        *self.do_not_touch_directly = len;
-    }
-
     unsafe fn add_len(&mut self, len: usize) {
         *self.do_not_touch_directly += len;
     }
