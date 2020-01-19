@@ -1,0 +1,24 @@
+[package]
+name = "fill"
+version = "0.1.0"
+description = "Provides the Fill trait, an alternative to Extend for finite containers"
+authors = ["Andreas Molzer <andreas.molzer@gmx.de>"]
+edition = "2018"
+license = "MIT"
+documentation = "https://docs.rs/fill"
+repository = "https://github.com/HeroicKatora/static-alloc"
+readme = "Readme.md"
+categories = ["embedded", "no-std"]
+
+[dependencies]
+# None.
+
+[features]
+default = []
+# Provide implementations for types in `alloc`
+alloc = []
+
+[[test]]
+name = "alloc"
+path = "tests/alloc.rs"
+required-features = ["alloc"]
