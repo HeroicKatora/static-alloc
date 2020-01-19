@@ -381,13 +381,8 @@ impl<T> Bump<T> {
         }
 
         let layout = Layout::new::<V>();
-        let Allocation { ptr, lifetime, level, } = self.try_alloc(layout)?;
-
-        Some(Allocation {
-            ptr: ptr.cast(),
-            lifetime,
-            level,
-        })
+        let allocation = self.try_alloc(layout)?;
+        Some(allocation.cast())
     }
 
     /// Get an allocation for a specific type at a specific level.
@@ -408,14 +403,8 @@ impl<T> Bump<T> {
         }
 
         let layout = Layout::new::<V>();
-        let Allocation { ptr, lifetime, level, } = self.try_alloc_at(layout, level.0)?;
-
-        Ok(Allocation {
-            // It has exactly size and alignment for `V` as requested.
-            ptr: ptr.cast(),
-            lifetime,
-            level,
-        })
+        let allocation = self.try_alloc_at(layout, level.0)?;
+        Ok(allocation.cast())
     }
 
     /// Observe the current level.
