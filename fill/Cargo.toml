@@ -26,4 +26,4 @@ path = "tests/alloc.rs"
 required-features = ["alloc"]
 
 [package.metadata.docs.rs]
-all-features = "true"
+all-features = true
