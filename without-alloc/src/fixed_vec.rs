@@ -112,7 +112,13 @@ pub struct Drain<'a, T> {
     /// Pointer to first element to drain (and to write to on `Drop`).
     elements: ptr::NonNull<T>,
     /// The length field of the underlying `FixedVec`.
-    len: &'a mut usize,
+    len: VecLength<'a>,
+}
+
+/// The length field of a `FixedVec`.
+/// Just extra assurance that we adhere to the invariants.
+struct VecLength<'vec> {
+    do_not_touch_directly: &'vec mut usize,
 }
 
 impl<T> FixedVec<'_, T> {
@@ -179,12 +185,7 @@ impl<T> FixedVec<'_, T> {
 
     /// Extracts the mutable slice containing the entire vector.
     pub fn as_mut_slice(&mut self) -> &mut [T] {
-        unsafe {
-            // SAFETY:
-            // * length is the number of initialized elements.
-            // * unaliased since we take ourselves by `mut` and `uninit` does the rest.
-            slice::from_raw_parts_mut(self.uninit.as_begin_ptr(), self.length)
-        }
+        self.init_tail_length().0
     }
 
     /// Remove all elements.
@@ -244,7 +245,7 @@ impl<T> FixedVec<'_, T> {
             return Err(val);
         }
 
-        let init = match self.head_tail_mut().1.split_first() {
+        let init = match self.head_tail_length().1.split_first() {
             Some(init) => init,
             None => return Err(val),
         };
@@ -261,7 +262,7 @@ impl<T> FixedVec<'_, T> {
             return None;
         }
 
-        let last = self.head_tail_mut().0.split_last().unwrap();
+        let last = self.head_tail_length().0.split_last().unwrap();
         let val = unsafe {
             // SAFETY: initialized and no reference of any kind exists to it.
             ptr::read(last.as_ptr())
@@ -404,16 +405,33 @@ impl<T> FixedVec<'_, T> {
             tail: end - start,
             tail_len: len - end,
             elements,
-            len: &mut self.length,
+            len: VecLength {
+                do_not_touch_directly: &mut self.length,
+            },
         }
     }
 
-    fn head_tail_mut(&mut self) -> (Uninit<'_, [T]>, Uninit<'_, [T]>) {
+    fn head_tail_length(&mut self) -> (Uninit<'_, [T]>, Uninit<'_, [T]>, &'_ mut usize) {
         // Borrow, do not affect the actual allocation by throwing away possible elements.
         let mut all = self.uninit.borrow_mut();
         // This must always be possible. `self.length` is nevery greater than the capacity.
         let tail = all.split_at(self.length).unwrap();
-        (all, tail)
+        (all, tail, &mut self.length)
+    }
+
+    // The vector instanced sliced into initialized initial slice, and uninit tail.
+    // Note that to remain valid the length must not be shortened.
+    fn init_tail_length(&mut self)
+        -> (&'_ mut [T], Uninit<'_, [T]>, VecLength<'_>)
+    {
+        let (head, tail, length) = self.head_tail_length();
+        let head = unsafe {
+            // SAFETY:
+            // * length is the number of initialized elements.
+            // * unaliased since we take ourselves by `mut` and `uninit` does the rest.
+            slice::from_raw_parts_mut(head.as_begin_ptr(), *length)
+        };
+        (head, tail, VecLength { do_not_touch_directly: length })
     }
 
     fn end_mut_ptr(&mut self) -> *mut T {
@@ -492,6 +510,20 @@ impl<T> Drain<'_, T> {
     /// If there are any elements remaining.
     pub fn is_empty(&self) -> bool {
         self.start == self.end
+    }
+}
+
+impl VecLength<'_> {
+    fn get(&self) -> usize {
+        *self.do_not_touch_directly
+    }
+
+    unsafe fn set_len(&mut self, len: usize) {
+        *self.do_not_touch_directly = len;
+    }
+
+    unsafe fn add_len(&mut self, len: usize) {
+        *self.do_not_touch_directly += len;
     }
 }
 
@@ -661,9 +693,9 @@ impl<T> Drop for Drain<'_, T> {
             unsafe {
                 let source = self.elements.as_ptr().add(self.tail);
                 ptr::copy(source, self.elements.as_ptr(), self.tail_len);
+                // Restore the tail to the vector.
+                self.len.add_len(self.tail_len);
             }
-            // Restore the tail to the vector.
-            *self.len += self.tail_len;
         }
     }
 }
