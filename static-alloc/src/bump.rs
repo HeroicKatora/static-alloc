@@ -644,11 +644,14 @@ impl<T> Bump<T> {
     where
         V: Copy,
     {
-        let layout = Layout::for_value(val);
-        let alloc = self.get_layout(layout)?;
+        let alloc = match NonZeroLayout::for_value(val) {
+            Some(layout) => self.get_layout(layout.into())?.cast::<V>(),
+            None => self.zls_fake_alloc(),
+        };
+
         Some(unsafe {
             // SAFETY: Just allocated this for `val`.
-            alloc.cast::<V>().leak_copy_of_slice(val)
+            alloc.leak_copy_of_slice(val)
         })
     }
 
@@ -673,8 +676,11 @@ impl<T> Bump<T> {
     where
         V: Copy,
     {
-        let layout = Layout::for_value(val);
-        let alloc = self.get_layout_at(layout, level)?;
+        let alloc = match NonZeroLayout::for_value(val) {
+            Some(layout) => self.get_layout_at(layout.into(), level)?.cast::<V>(),
+            None => self.zls_fake_alloc(),
+        };
+
         Ok(unsafe {
             // SAFETY: Just allocated this for `val`.
             alloc.cast::<V>().leak_copy_of_slice(val)
@@ -688,6 +694,17 @@ impl<T> Bump<T> {
         // havee the same layout which only depends on the alignment. If we need a storage for this
         // ZST we just take one of those as our base 'allocation' which can also never be aliased.
         let alloc: &[Z; 0] = &[];
+
+        Allocation {
+            ptr: NonNull::from(alloc).cast(),
+            lifetime: Invariant::default(),
+            level: self.level(),
+        }
+    }
+
+    /// Allocation for a zero-length slice.
+    fn zls_fake_alloc<Z>(&self) -> Allocation<'_, Z> {
+        let alloc: &mut [Z; 0] = &mut [];
 
         Allocation {
             ptr: NonNull::from(alloc).cast(),

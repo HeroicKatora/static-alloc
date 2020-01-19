@@ -74,4 +74,7 @@ fn slices() {
 
     let mut_copy = slab.leak_copy_of_slice(DATA).unwrap();
     assert_eq!(DATA, mut_copy);
+
+    let empty: &mut [u16] = slab.leak_copy_of_slice(&[]).unwrap();
+    assert_eq!(empty, []);
 }
