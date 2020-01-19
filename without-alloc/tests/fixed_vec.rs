@@ -195,3 +195,37 @@ fn hashing() {
 
     assert_eq!(map.get(KEY).cloned(), Some(VAL));
 }
+
+#[test]
+fn fill_from_within() {
+    let memory: Bump<[u8; 1024]> = Bump::uninit();
+
+    let mut vec = memory.fixed_vec(16).unwrap();
+    vec.fill(0..8);
+
+    let (head, mut extend) = vec.split_to_extend();
+    assert_eq!(extend.len(), 0);
+    assert_eq!(extend.capacity(), 8);
+
+    let spill = extend.fill(head.iter().copied());
+    assert_eq!(spill.len(), 0);
+    assert_eq!(extend.len(), 8);
+    assert_eq!(extend.capacity(), 8);
+
+    assert!((0..8).eq(extend.iter().copied()));
+    assert_eq!(head, extend.as_slice());
+    assert_eq!(head, extend.as_mut_slice());
+
+    let last = extend.pop().unwrap();
+    assert_eq!(last, 7);
+    let push = extend.push(last);
+    assert!(push.is_ok());
+    let no_more = extend.push(42);
+    assert_eq!(no_more, Err(42));
+
+    drop((head, extend));
+
+    assert_eq!(vec.len(), 16);
+    assert!((0..8).eq(vec[..8].iter().copied()));
+    assert!((0..8).eq(vec[8..].iter().copied()));
+}

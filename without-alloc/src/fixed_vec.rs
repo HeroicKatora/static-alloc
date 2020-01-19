@@ -115,6 +115,28 @@ pub struct Drain<'a, T> {
     len: VecLength<'a>,
 }
 
+/// Modify a vector's uninitialized tail without borrowing its primary elements.
+///
+/// This encapsulates a secondary [`FixedVec`] that works within the uninitialized tail of another
+/// vector and, when dropped, merges its elements into the primary vector. It also avoids borrowing
+/// the primary vector so that these modifications can depend on inspection and mutation of the
+/// elements in the primary vector. This, for example, allows one to clone elements from the
+/// primary vector's storage into the tail.
+///
+/// Note that this can be done recursively by grabbing another `Extender` for an existing instance.
+///
+/// [`FixedVec`]: struct.FixedVec.html
+pub struct Extender<'vec, T> {
+    /// The tail of the original vector.
+    /// We do not expose it directly as it is critical for soundness that its first element is
+    /// actually consecutive to the last element of the primary vector.
+    tail: FixedVec<'vec, T>,
+    /// The length field of the original vector.
+    /// On drop, we increase it with the number of element we have in the tail, conceptually moving
+    /// these elements to the primary vector.
+    len: VecLength<'vec>,
+}
+
 /// The length field of a `FixedVec`.
 /// Just extra assurance that we adhere to the invariants.
 struct VecLength<'vec> {
@@ -360,6 +382,15 @@ impl<T> FixedVec<'_, T> {
         iter
     }
 
+    /// Extend the vector with new elements generated from its existing elements.
+    pub fn split_to_extend(&mut self)
+        -> (&'_ mut [T], Extender<'_, T>)
+    {
+        let (init, tail, len) = self.init_tail_length();
+        let tail = FixedVec::from_unaligned(tail);
+        (init, Extender { tail, len, })
+    }
+
     /// Creates a draining iterator that yields and removes elements a given range.
     ///
     /// It is unspecified which elements are removed if the `Drain` is never dropped. If you
@@ -510,6 +541,67 @@ impl<T> Drain<'_, T> {
     /// If there are any elements remaining.
     pub fn is_empty(&self) -> bool {
         self.start == self.end
+    }
+}
+
+impl<T> Extender<'_, T> {
+    /// Get a reference to the initialized slice in the tail.
+    pub fn as_slice(&self) -> &[T] {
+        self.tail.as_slice()
+    }
+
+    /// Get a mutable reference to the initialized slice in the tail.
+    pub fn as_mut_slice(&mut self) -> &mut [T] {
+        self.tail.as_mut_slice()
+    }
+
+    /// Returns the number of elements in the tail.
+    pub fn len(&self) -> usize {
+        self.tail.len()
+    }
+
+    /// Returns the number of elements the tail can hold.
+    pub fn capacity(&self) -> usize {
+        self.tail.capacity()
+    }
+
+    /// Appends an element to the back of a collection.
+    ///
+    /// See [`push`] of [`FixedVec`] for details.
+    ///
+    /// [`FixedVec`]: struct.FixedVec.html
+    /// [`pop`]: struct.FixedVec.html#method.push
+    pub fn push(&mut self, val: T) -> Result<(), T> {
+        self.tail.push(val)
+    }
+
+    /// Removes the last element from the tail and returns it, or `None` if it is empty.
+    ///
+    /// See [`pop`] of [`FixedVec`] for details.
+    ///
+    /// [`FixedVec`]: struct.FixedVec.html
+    /// [`pop`]: struct.FixedVec.html#method.pop
+    pub fn pop(&mut self) -> Option<T> {
+        self.tail.pop()
+    }
+
+    /// Extend the vector with as many elements as fit.
+    ///
+    /// See [`fill`] of [`FixedVec`] for details.
+    ///
+    /// [`FixedVec`]: struct.FixedVec.html
+    /// [`fill`]: struct.FixedVec.html#method.fill
+    pub fn fill<I: IntoIterator<Item = T>>(&mut self, iter: I)
+        -> I::IntoIter
+    {
+        self.tail.fill(iter)
+    }
+
+    /// Recursively extend the tail with new elements generated from its existing elements.
+    pub fn split_to_extend(&mut self)
+        -> (&'_ mut [T], Extender<'_, T>)
+    {
+        self.tail.split_to_extend()
     }
 }
 
@@ -697,6 +789,56 @@ impl<T> Drop for Drain<'_, T> {
                 self.len.add_len(self.tail_len);
             }
         }
+    }
+}
+
+impl<T> ops::Deref for Extender<'_, T> {
+    type Target = [T];
+    fn deref(&self) -> &[T] {
+        self.as_slice()
+    }
+}
+
+impl<T> ops::DerefMut for Extender<'_, T> {
+    fn deref_mut(&mut self) -> &mut [T] {
+        self.as_mut_slice()
+    }
+}
+
+impl<T> Drop for Extender<'_, T> {
+    fn drop(&mut self) {
+        let new_elements = self.tail.len();
+        unsafe {
+            // Prevent elements from being dropped.
+            self.tail.set_len(0);
+            // Add them to the underlying primary vector.
+            // Due to the invariant the old elements are consecutive to the primary vector.
+            self.len.add_len(new_elements);
+        }
+    }
+}
+
+impl<T> borrow::Borrow<[T]> for Extender<'_, T> {
+    fn borrow(&self) -> &[T] {
+        &self.tail
+    }
+}
+
+impl<T> borrow::BorrowMut<[T]> for Extender<'_, T> {
+    fn borrow_mut(&mut self) -> &mut [T] {
+        &mut self.tail
+    }
+}
+
+impl<T> AsRef<[T]> for Extender<'_, T> {
+    fn as_ref(&self) -> &[T] {
+        &self.tail
+    }
+}
+
+impl<T> AsMut<[T]> for Extender<'_, T> {
+    fn as_mut(&mut self) -> &mut [T] {
+        &mut self.tail
     }
 }
 
