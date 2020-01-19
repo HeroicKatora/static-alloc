@@ -495,8 +495,7 @@ impl UninitView<'_, ()> {
     ///
     /// [`Uninit::split_layout`]: ./struct.Uninit.html#method.split_layout
     pub fn split_layout(&mut self, layout: Layout) -> Option<Self> {
-        let align = self.ptr.as_ptr()
-            .align_offset(layout.align());
+        let align = (self.ptr.as_ptr() as usize).wrapping_neg() % layout.align();
         let aligned_len = self.len
             .checked_sub(align)
             .and_then(|len| len.checked_sub(layout.size()));
@@ -780,7 +779,7 @@ impl<'a, T: ?Sized> UninitView<'a, T> {
     ///
     /// The `cast` to a type of the provided layout will work without error.
     pub fn fits(&self, layout: Layout) -> bool {
-        self.ptr.as_ptr().align_offset(layout.align()) == 0
+        self.ptr.as_ptr() as usize % layout.align() == 0
             && layout.size() <= self.len
     }
 
