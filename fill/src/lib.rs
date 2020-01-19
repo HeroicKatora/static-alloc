@@ -22,3 +22,17 @@ impl<T> Fill<T> for alloc::vec::Vec<T> {
         iter
     }
 }
+
+#[cfg(feature = "alloc")]
+/// Fills the queue as far as possible without reallocating.
+impl<T> Fill<T> for alloc::collections::VecDeque<T> {
+    fn fill<I>(&mut self, iter: I) -> I::IntoIter
+        where I: IntoIterator<Item=T>
+    {
+        let mut iter = iter.into_iter();
+        for item in iter.by_ref().take(self.capacity() - self.len()) {
+            self.push_back(item);
+        }
+        iter
+    }
+}
