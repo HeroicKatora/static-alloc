@@ -702,10 +702,11 @@ mod tests {
             weak: Cell::new(1),
         };
 
-        let val_ptr = &boxed as *const _ as *const usize;
+        let box_ptr = &mut boxed as *mut RcBox<usize>;
+        let val_ptr = box_ptr as *const usize;
         assert_eq!(unsafe { *val_ptr }, 0);
 
-        boxed.val = 0xdeadbeef;
+        unsafe { (*box_ptr).val = 0xdeadbeef };
         assert_eq!(unsafe { *val_ptr }, 0xdeadbeef);
     }
 
