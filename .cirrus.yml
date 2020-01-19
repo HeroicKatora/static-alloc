@@ -36,6 +36,12 @@ release_task:
     image: rust:latest
   script: ./release_checks without-alloc
 
+release_task:
+  only_if: $CIRRUS_BRANCH =~ 'release-fill.*'
+  container:
+    image: rust:latest
+  script: ./release_checks fill
+
 doc_task:
   container:
     image: rustlang/rust:nightly
