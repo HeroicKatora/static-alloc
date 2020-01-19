@@ -55,7 +55,7 @@ extern crate alloc;
 /// # use fill::Fill;
 /// let mut option = None;
 ///
-/// let spilled = option.fill_and_spill(42..);
+/// let spilled = option.fill_and_keep_tail(42..);
 /// assert_eq!(option, Some(42));
 /// assert_eq!(spilled.start, 43);
 /// ```
@@ -71,7 +71,7 @@ pub trait Fill<T> {
     ///
     /// This is only a shorthand for iterating by reference when the caller wants to inspect the
     /// state after filling or when a fall-back is supposed to consume remaining elements.
-    fn fill_and_spill<I>(&mut self, iter: I) -> I::IntoIter
+    fn fill_and_keep_tail<I>(&mut self, iter: I) -> I::IntoIter
         where I: IntoIterator<Item=T>
     {
         let mut iter = iter.into_iter();
