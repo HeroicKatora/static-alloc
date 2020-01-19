@@ -670,35 +670,48 @@ impl<T> Drop for Drain<'_, T> {
 
 /// Extend the vector to the extent the allocation allows it.
 ///
-/// Appends elements from the iterator until the capacity of the vector is exhausted. Then drops
-/// the remaining iterator **without** iterating through all remaining elements. This allows the
-/// caller to decide the fate or all other elements by passing the iterator by reference.
+/// Appends elements from the iterator and panics if the iterator contains more elements than the
+/// capacity of the vector. See [`fill`] for a specialized method that does not further exhaust the
+/// iterator and does not panic.
 ///
 /// ## Examples
 ///
-/// Some iterators will drain themselves on drop, for example [`Drain`]. This will empty the source
-/// vector even if the target has not enough space.
+/// To avoid panicking you can limit the iterator to the remaining capacity. Depending on the
+/// underlying iterator it will exhaust itself further when the iterator itself is dropped.
 ///
 /// ```
 /// # use core::mem::MaybeUninit;
 /// # use without_alloc::FixedVec;
-///
 /// let mut memory: [MaybeUninit<usize>; 15] = [MaybeUninit::uninit(); 15];
-/// let mut source = FixedVec::new((&mut memory[..]).into());
-/// source.extend(0..15);
+/// let mut source_vec = FixedVec::new((&mut memory[..]).into());
+/// source_vec.extend(0..15);
 ///
 /// let mut memory: [MaybeUninit<usize>; 3] = [MaybeUninit::uninit(); 3];
 /// let mut target = FixedVec::new((&mut memory[..]).into());
-/// target.extend(source.drain(..));
+/// target.extend(source_vec.drain(..).take(3));
 ///
-/// assert!(source.is_empty());
+/// assert!(source_vec.is_empty());
 /// assert_eq!(target.len(), target.capacity());
 /// ```
+///
+/// If the iterator is not limited to the number of elements then this method will panic.
+///
+/// ```should_panic
+/// # use core::mem::MaybeUninit;
+/// # use without_alloc::FixedVec;
+/// let mut memory: [MaybeUninit<usize>; 3] = [MaybeUninit::uninit(); 3];
+/// let mut vec = FixedVec::new((&mut memory[..]).into());
+/// vec.extend(0..);
+/// ```
+///
+/// [`fill`]: #method.fill
 impl<T> iter::Extend<T> for FixedVec<'_, T> {
     fn extend<I>(&mut self, iter: I)
         where I: IntoIterator<Item=T>,
     {
-        let _ = self.fill(iter);
+        for _spill in self.fill(iter) {
+            panic!("FixedVec memory exhausted");
+        }
     }
 }
 
