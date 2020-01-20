@@ -43,9 +43,23 @@
 #[cfg(feature = "alloc")]
 extern crate alloc;
 
+mod assign;
 mod fill;
 
-pub use fill::Fill;
+pub use crate::assign::Assign;
+pub use crate::fill::Fill;
+
+pub trait IntoIteratorExt: IntoIterator {
+    fn assign<'item, T: 'item>(self) -> Assign<Self::IntoIter>
+    where
+        Self: Sized + IntoIterator<Item=&'item mut T>,
+        Self::IntoIter: ExactSizeIterator,
+    {
+        Assign::<Self::IntoIter>::new(self.into_iter())
+    }
+}
+
+impl<T: IntoIterator> IntoIteratorExt for T { }
 
 // Can't use the macro-call itself within the `doc` attribute. So force it to eval it as part of
 // the macro invocation.

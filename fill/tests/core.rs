@@ -1,4 +1,4 @@
-use fill::Fill;
+use fill::{Fill, IntoIteratorExt};
 
 #[test]
 fn slice() {
@@ -43,4 +43,13 @@ fn result() {
     assert_eq!(unfilled.len(), 1);
 
     assert_eq!(memory, [0, 1, 0, 0]);
+}
+
+#[test]
+fn assign() {
+    let zero: &mut [u8] = &mut [0u8; 4];
+    let ones = [1u8; 2];
+
+    zero.assign().fill(ones.iter().copied());
+    assert_eq!(zero, [1, 1, 0, 0]);
 }
