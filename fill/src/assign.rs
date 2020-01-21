@@ -2,6 +2,8 @@
 ///
 /// This struct is crated through the [`IntoIteratorExt::assign`] method. See its documentation for
 /// details.
+///
+/// [`IntoIteratorExt::assign`]: trait.IntoIteratorExt.html#method.assign
 pub struct Assign<I> {
     inner: I,
 }
@@ -30,7 +32,7 @@ where
         // Do not use `zip` to control the exact calls to `next`.
         while self.inner.len() != 0 {
             if let Some(item) = iter.next() {
-                *self.inner.next().unwrap() = item;
+                *self.inner.next().expect("Fill: Exact size iterator unexpectedly empty.") = item;
             } else {
                 break
             }

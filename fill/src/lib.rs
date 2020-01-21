@@ -49,7 +49,33 @@ mod fill;
 pub use crate::assign::Assign;
 pub use crate::fill::Fill;
 
+/// Adapt generic iterable structs into interaction with `Fill`.
+///
+/// This is an extension traits that provides generic convenience adaptors.
 pub trait IntoIteratorExt: IntoIterator {
+    /// An adaptor that 'fills' the sequence by assigning to its referenced elements.
+    ///
+    /// One can view the remaining items that have yet to be iterated over as free slots that need
+    /// to be initialized. The assigned-from iterator is only polled if there is a free slot and,
+    /// conversely, the assigned-to iterator is only advanced if there is an actual element to
+    /// write. If the assigned-to iterator misrepresented its capacity then the fill process
+    /// panics.
+    ///
+    /// This requires the guarantee of being able to advance the iterator without calling `next`.
+    /// Requiring the underlying iterator to implement `ExactSizeIterator` allows implementing this
+    /// check.
+    ///
+    /// # Examples
+    ///
+    /// This overwrites an arbitrarily sized memory region with a repeating pattern.
+    ///
+    /// ```rust
+    /// use fill::{Fill, IntoIteratorExt};
+    ///
+    /// fn init_with_pattern(mem: &mut [u8]) {
+    ///     mem.assign().fill((0..10).cycle());
+    /// }
+    /// ```
     fn assign<'item, T: 'item>(self) -> Assign<Self::IntoIter>
     where
         Self: Sized + IntoIterator<Item=&'item mut T>,
