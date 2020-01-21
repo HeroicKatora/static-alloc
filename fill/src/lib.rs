@@ -38,6 +38,7 @@
 //! ```
 
 #![no_std]
+#![forbid(unsafe_code)]
 #![deny(missing_docs)]
 
 #[cfg(feature = "alloc")]
