@@ -46,7 +46,7 @@ extern crate alloc;
 
 mod fill;
 
-pub use fill::Fill;
+pub use crate::fill::Fill;
 
 // Can't use the macro-call itself within the `doc` attribute. So force it to eval it as part of
 // the macro invocation.
