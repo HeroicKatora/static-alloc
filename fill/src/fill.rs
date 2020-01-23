@@ -58,6 +58,60 @@ pub trait Fill<T> {
         self.fill(iter.into_iter().inspect(|_| count += 1));
         count
     }
+
+    /// Fill the container and return if more elements could have been available.
+    ///
+    /// This returns `None` if the iterator was exhausted before the container could be filled
+    /// completely. Otherwise it will return `Some(_)` containing the remaining iterator.
+    ///
+    /// Note that a well behaved fillable container should not poll more items when it is full so
+    /// that this method should return `Some` but when it violates this assumption then the method
+    /// might return `None` instead as the implementation merely detects if the fused iterator was
+    /// exhausted.
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// # use fill::Fill;
+    /// let mut option = None;
+    /// assert_eq!(option.checked_fill(None).is_some(), false);
+    /// assert_eq!(option.checked_fill(0..).is_some(), true);
+    /// ```
+    ///
+    /// Note that a full container will not poll the iterator, so even an 'obviously empty'
+    /// iterator will cause the function to return true.
+    ///
+    /// ```
+    /// # use fill::Fill;
+    /// let mut full = Some(0);
+    /// assert_eq!(full.checked_fill(None).is_some(), true);
+    /// ```
+    fn checked_fill<I>(&mut self, iter: I) -> Option<I::IntoIter>
+        where I: IntoIterator<Item=T>
+    {
+        struct Overflow<I> {
+            overflow: bool,
+            inner: I,
+        }
+
+        impl<I: Iterator> Iterator for Overflow<I> {
+            type Item = I::Item;
+            fn next(&mut self) -> Option<I::Item> {
+                let next = self.inner.next();
+                self.overflow &= next.is_some();
+                next
+            }
+        }
+
+        let mut iter = iter.into_iter();
+        // We iterate by reference over the fused iterator instead of iterating directly. This
+        // avoids exhausting the iterator in some unexpected way when we return `None`.
+        let overflow = self.fill_and_keep_tail(Overflow {
+            overflow: true,
+            inner: iter.by_ref().fuse(),
+        }).overflow;
+        Some(iter).filter(|_| overflow)
+    }
 }
 
 #[cfg(feature = "alloc")]
