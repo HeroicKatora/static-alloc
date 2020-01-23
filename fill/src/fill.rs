@@ -33,6 +33,31 @@ pub trait Fill<T> {
         self.fill(&mut iter);
         iter
     }
+
+    /// Fill the container and count the number of pulled items.
+    ///
+    /// The count is equal to the number of elements that have been pulled from the iterator. On
+    /// well-behaved containers this shall equal the number of items inserted as it should do so
+    /// for all items.
+    ///
+    /// ## Examples
+    ///
+    /// For containers with a statically known capacity this can be an alternative to checking the
+    /// current state after a fill operation.
+    ///
+    /// ```
+    /// # use fill::Fill;
+    /// let mut option = None;
+    /// assert_eq!(option.fill_count(0..), 1);
+    /// assert_eq!(option.fill_count(1..), 0);
+    /// ```
+    fn fill_count<I>(&mut self, iter: I) -> usize
+        where I: IntoIterator<Item=T>
+    {
+        let mut count = 0;
+        self.fill(iter.into_iter().inspect(|_| count += 1));
+        count
+    }
 }
 
 #[cfg(feature = "alloc")]
