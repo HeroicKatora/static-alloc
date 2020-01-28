@@ -80,7 +80,12 @@ impl Allocation {
     }
 }
 
-/// Note the 
+/// A reference is an `AllocRef`.
+///
+/// Note the lifetime of the references is exactly the same as the lifetime of the trait. If the
+/// reference outlived the parameter then the returned allocations would not live long enough.
+/// Conversely, if the parameter outlived the lifetime then it would not be possible to construct
+/// the reference necessary for the trait.
 unsafe impl<'rf, T> AllocRef for &'rf T
     where T: LocalAlloc<'rf>
 {
