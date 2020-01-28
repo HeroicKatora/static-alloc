@@ -17,15 +17,14 @@ fn shrink() {
     v.pop();
     v.shrink_to_fit();
     assert_eq!(v.capacity(), 1);
+    assert_eq!(&v, &[0xdeadbeef_u32; 1]);
 }
 
 #[test]
 fn grow() {
     let mut v = vec![0xdeadbeef_u32; 2];
-    dbg!(A.level());
     assert_eq!(v.capacity(), 2);
     v.push(0xdeadbeef_u32);
     assert!(v.capacity() > 3);
-    dbg!(v.capacity());
-    dbg!(A.level());
+    assert_eq!(&v, &[0xdeadbeef_u32; 3]);
 }
