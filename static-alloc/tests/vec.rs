@@ -10,3 +10,22 @@ fn ok_vec() {
     v.into_iter()
         .for_each(|x| assert_eq!(x, 0xdeadbeef_u32));
 }
+
+#[test]
+fn shrink() {
+    let mut v = vec![0xdeadbeef_u32; 2];
+    v.pop();
+    v.shrink_to_fit();
+    assert_eq!(v.capacity(), 1);
+}
+
+#[test]
+fn grow() {
+    let mut v = vec![0xdeadbeef_u32; 2];
+    dbg!(A.level());
+    assert_eq!(v.capacity(), 2);
+    v.push(0xdeadbeef_u32);
+    assert!(v.capacity() > 3);
+    dbg!(v.capacity());
+    dbg!(A.level());
+}

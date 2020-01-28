@@ -704,9 +704,45 @@ unsafe impl<T> GlobalAlloc for Bump<T> {
             .unwrap_or_else(null_mut)
     }
 
+    unsafe fn realloc(
+        &self,
+        ptr: *mut u8,
+        current: Layout,
+        new_size: usize,
+    ) -> *mut u8 {
+        let current = NonZeroLayout::from_layout(current.into()).unwrap();
+        // As guaranteed, `new_size` is greater than 0.
+        let new_size = core::num::NonZeroUsize::new_unchecked(new_size); 
+
+        let target = match layout_reallocated(current, new_size) {
+            Some(target) => target,
+            None => return core::ptr::null_mut(),
+        };
+
+        // Construct an allocation. This is not safe in general but the lifetime is not important.
+        let fake = alloc_traits::Allocation {
+            ptr: NonNull::new_unchecked(ptr),
+            layout: current,
+            lifetime: AllocTime::default(),
+        };
+
+        alloc_traits::LocalAlloc::realloc(self, fake, target)
+            .map(|alloc| alloc.ptr.as_ptr())
+            .unwrap_or_else(core::ptr::null_mut)
+    }
+
     unsafe fn dealloc(&self, _ptr: *mut u8, _layout: Layout) {
         // We are a slab allocator and do not deallocate.
     }
+}
+
+fn layout_reallocated(layout: NonZeroLayout, target: core::num::NonZeroUsize)
+    -> Option<NonZeroLayout>
+{
+    // This may not be a valid layout.
+    let layout = Layout::from_size_align(target.get(), layout.align()).ok()?;
+    // This must succeed though, as the size was non-zero.
+    Some(NonZeroLayout::from_layout(layout.into()).unwrap())
 }
 
 unsafe impl<'alloc, T> LocalAlloc<'alloc> for Bump<T> {
@@ -719,6 +755,46 @@ unsafe impl<'alloc, T> LocalAlloc<'alloc> for Bump<T> {
             layout: layout,
             lifetime: AllocTime::default(),
         })
+    }
+
+    // TODO: alloc zeroed if the constructor was `Self::zeroed()`
+
+    /// Reallocates if the layout is strictly smaller and the allocation aligned.
+    ///
+    /// Note that this may succeed spuriously if the previous allocation is incidentally aligned to
+    /// a larger alignment than had been request.
+    ///
+    /// Also not, reallocating to a smaller layout is NOT useless.
+    ///
+    /// It confirms that this allocator does not need the allocated layout to re/deallocate.
+    /// Otherwise, even reallocating to a strictly smaller layout would be impossible without
+    /// storing the prior layout.
+    unsafe fn realloc(
+        &'alloc self,
+        alloc: alloc_traits::Allocation<'alloc>,
+        layout: NonZeroLayout,
+    ) -> Option<alloc_traits::Allocation<'alloc>> {
+        if alloc.ptr.as_ptr() as usize % layout.align() == 0
+            && alloc.layout.size() >= layout.size() 
+        {
+            // Obvious fit, nothing to do.
+            return Some(alloc_traits::Allocation {
+                ptr: alloc.ptr,
+                layout,
+                lifetime: alloc.lifetime,
+            });
+        }
+
+        // TODO: we could try to allocate at the exact level that the allocation ends. If this
+        // succeeds, there is no copying necessary. This was the point of `Level` anyways.
+
+        let new_alloc = LocalAlloc::alloc(self, layout)?;
+        core::ptr::copy_nonoverlapping(
+            alloc.ptr.as_ptr(),
+            new_alloc.ptr.as_ptr(),
+            layout.size().min(alloc.layout.size()).into());
+        // No dealloc.
+        return Some(new_alloc);
     }
 
     unsafe fn dealloc(&'alloc self, _: alloc_traits::Allocation<'alloc>) {
