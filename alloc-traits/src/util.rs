@@ -41,7 +41,8 @@ pub mod defaults {
         /// Change the layout of a block previously allocated.
         ///
         /// See [`LocalAlloc::realloc`] for more information. This is a default implementation that
-        /// might be less efficient than a dedicated one. It only uses the `alloc` method.
+        /// might be less efficient than a dedicated one. It only uses the `alloc` and `dealloc`
+        /// methods.
         ///
         /// # Safety
         /// See the trait.
@@ -60,6 +61,7 @@ pub mod defaults {
                 alloc.ptr.as_ptr(),
                 new_alloc.ptr.as_ptr(),
                 core::cmp::min(layout.size(), alloc.layout.size()).get());
+            this.dealloc(alloc);
             Some(new_alloc)
         }
     }
