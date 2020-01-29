@@ -1,8 +1,9 @@
 use core::fmt;
 use core::marker::PhantomData;
-use core::ptr::{copy_nonoverlapping, write_bytes, NonNull};
+use core::ptr::NonNull;
 
 use crate::NonZeroLayout;
+use crate::util::defaults;
 
 /// A marker struct denoting a lifetime that is not simply coercible to another.
 #[derive(Clone, Copy, Default, Hash, PartialEq, Eq, PartialOrd, Ord)]
@@ -54,11 +55,7 @@ pub unsafe trait LocalAlloc<'alloc> {
     fn alloc_zeroed(&'alloc self, layout: NonZeroLayout)
         -> Option<Allocation<'alloc>> 
     {
-        let allocation = self.alloc(layout)?;
-        unsafe {
-            write_bytes(allocation.ptr.as_ptr(), 0u8, allocation.layout.size().into());
-        }
-        Some(allocation)
+        defaults::local::alloc_zeroed(self, layout)
     }
 
     /// Change the layout of a block previously allocated.
@@ -67,15 +64,14 @@ pub unsafe trait LocalAlloc<'alloc> {
     /// least** the layout requested by the caller and the contiguous region of bytes, starting at
     /// the pointer and with the size of the returned layout, is initialized with the prefix of the
     /// previous allocation that is still valid.
+    ///
+    /// Note that it is *NOT* safe to elide the methods call for changing the alignment of the
+    /// layout to a less strict one, or to an incidentally fulfilled stricter version. The
+    /// allocator might make use of the alignment during deallocation.
     unsafe fn realloc(&'alloc self, alloc: Allocation<'alloc>, layout: NonZeroLayout)
         -> Option<Allocation<'alloc>>
     {
-        let new_alloc = self.alloc(layout)?;
-        copy_nonoverlapping(
-            alloc.ptr.as_ptr(),
-            new_alloc.ptr.as_ptr(),
-            layout.size().min(alloc.layout.size()).into());
-        Some(new_alloc)
+        defaults::local::realloc(self, alloc, layout)
     }
 }
 

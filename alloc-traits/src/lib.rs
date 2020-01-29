@@ -21,6 +21,7 @@
 
 mod layout;
 mod local;
+pub mod util;
 
 pub use crate::layout::{Layout, NonZeroLayout};
 pub use crate::local::{AllocTime, Allocation, LocalAlloc};
