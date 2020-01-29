@@ -1,6 +1,6 @@
 [package]
 name = "alloc-traits"
-version = "0.1.0"
+version = "0.1.1"
 description = "Traits to replace or supplement the alloc module in no_std"
 authors = ["Andreas Molzer <andreas.molzer@gmx.de>"]
 edition = "2018"

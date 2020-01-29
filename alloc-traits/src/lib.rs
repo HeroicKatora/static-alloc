@@ -9,11 +9,11 @@
 //! There are additional independent crates with additional abstractions on-top:
 //! * [`static-alloc`]: A simple allocator drawing from a memory region statically
 //!   embedded within the compiled binary.
-//! * [`alloc-free`]: A set of data structures (`Box`, `Vec`, `Rc`, ...) that can
+//! * [`without-alloc`]: A set of data structures (`Box`, `Vec`, `Rc`, ...) that can
 //!   be allocated from the implementors of the traits defined here.
 //! 
 //! [`static-alloc`]: https://crates.io/crates/static-alloc
-//! [`alloc-free`]: https://crates.io/crates/alloc-free
+//! [`without-alloc`]: https://crates.io/crates/without-alloc
 
 // Copyright 2019 Andreas Molzer
 #![no_std]
