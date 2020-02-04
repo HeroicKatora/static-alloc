@@ -139,9 +139,10 @@ use alloc_traits::{AllocTime, LocalAlloc, NonZeroLayout};
 ///
 /// WIP: slices.
 pub struct Bump<T> {
-    /// An monotonic atomic counter of consumed bytes.
+    /// While in shared state, an monotonic atomic counter of consumed bytes.
     ///
-    /// It is only mutably accessed in `bump` which guarantees its invariants.
+    /// While shared it is only mutated in `bump` which guarantees its invariants. In the mutable
+    /// reference state it is modified arbitrarily.
     consumed: AtomicUsize,
 
     /// Outer unsafe cell due to thread safety.
@@ -295,6 +296,49 @@ impl<T> Bump<T> {
         }
     }
 
+    /// Reset the bump allocator.
+    ///
+    /// Requires a mutable reference, as no allocations can be active when doing it. This behaves
+    /// as if a fresh instance was assigned but it does not overwrite the bytes in the backing
+    /// storage. (You can unsafely rely on this).
+    ///
+    /// ## Usage
+    ///
+    /// ```
+    /// # use static_alloc::Bump;
+    /// let mut stack_buf = Bump::<usize>::uninit();
+    ///
+    /// let bytes = stack_buf.leak(0usize.to_be_bytes()).unwrap();
+    /// // Now the bump allocator is full.
+    /// assert!(stack_buf.leak(0u8).is_err());
+    ///
+    /// // We can reuse if we are okay with forgetting the previous value.
+    /// stack_buf.reset();
+    /// let val = stack_buf.leak(0usize).unwrap();
+    /// ```
+    ///
+    /// Trying to use the previous value does not work, as the stack is still borrowed. Note that
+    /// any user unsafely tracking the lifetime must also ensure this through proper lifetimes that
+    /// guarantee that borrows are alive for appropriate times.
+    ///
+    /// ```compile_fail
+    /// // error[E0502]: cannot borrow `stack_buf` as mutable because it is also borrowed as immutable
+    /// # use static_alloc::Bump;
+    /// let mut stack_buf = Bump::<usize>::uninit();
+    ///
+    /// let bytes = stack_buf.leak(0usize).unwrap();
+    /// //          --------- immutably borrow occurs here
+    /// stack_buf.reset();
+    /// // ^^^^^^^ mutable borrow occurs here.
+    /// let other = stack_buf.leak(0usize).unwrap();
+    ///
+    /// *bytes += *other;
+    /// // ------------- immutable borrow later used here
+    /// ```
+    pub fn reset(&mut self) {
+        *self.consumed.get_mut() = 0;
+    }
+
     /// Allocate a region of memory.
     ///
     /// This is a safe alternative to [GlobalAlloc::alloc](#impl-GlobalAlloc).
@@ -423,7 +467,7 @@ impl<T> Bump<T> {
     /// Keep in mind that concurrent usage of the same slab may modify the level before you are
     /// able to use it in `alloc_at`. Calling this method provides also no other guarantees on
     /// synchronization of memory accesses, only that the values observed by the caller are a
-    /// monotonically increasing seequence.
+    /// monotonically increasing seequence while a shared reference exists.
     pub fn level(&self) -> Level {
         Level(self.consumed.load(Ordering::SeqCst))
     }
@@ -633,7 +677,7 @@ impl<T> Bump<T> {
 
     /// Try to bump the monotonic, atomic consume counter.
     ///
-    /// This is the only place modifying `self.consumed`.
+    /// This is the only place doing shared modification to `self.consumed`.
     ///
     /// Returns `Ok` if the consume counter was as expected. Monotonicty and atomicity guarantees
     /// to the caller that no overlapping range can succeed as well. This allocates the range to
