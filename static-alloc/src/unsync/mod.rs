@@ -1,9 +1,10 @@
-/// This module defines a simple bump allocator.
-/// The allocator is not thread safe.
+//! This module defines a simple bump allocator.
+//! The allocator is not thread safe.
+
 mod node;
 mod allocation;
 
-use node::Node;
+use node::{AllocationError, Node, BumpError};
 use allocation::Allocation;
 
 use core::{
@@ -22,14 +23,14 @@ pub struct Bump {
 impl Bump {
     /// Creates a new `Bump` that has a capacity of `size`
     /// bytes.
-    pub fn new(size: usize) -> Result<Self, ()> {
-        Node::new(size).map(|node| Self {
+    pub fn new(size: usize) -> Result<Self, AllocationError> {
+        Node::alloc(size).map(|node| Self {
             node: Cell::new(node)
         })
     }
 
     /// Attempts to allocate `elem` within the allocator.
-    pub fn alloc<'bump, T>(&'bump self, elem: T) -> Result<Allocation<'bump, T>, T> {
+    pub fn alloc<'bump, T>(&'bump self, elem: T) -> Result<Allocation<'bump, T>, BumpError<T>> {
         unsafe {
             let node_ptr = self.node.as_ptr();
             (&*node_ptr).as_ref().push(elem)
@@ -47,6 +48,28 @@ impl Bump {
     }
 }
 
+impl Bump {
+    /// Returns the capacity of this `Bump`.
+    /// This is how many *bytes* in total can
+    /// be allocated within this `Bump`.
+    pub fn capacity(&self) -> usize {
+        unsafe {
+            self.node.get().as_ref().capacity()
+        }
+    }
+
+    /// Returns the remaining capacity of this `Bump`.
+    /// This is how many more *bytes* can be allocated
+    /// within this `Bump`.
+    pub fn remaining_capacity(&self) -> usize {
+        let index = unsafe {
+            self.node.get().as_ref().current_index()
+        };
+
+        self.capacity() - index
+    }
+}
+
 impl Drop for Bump {
     fn drop(&mut self) {
         let mut current = Some(self.node.get());
@@ -58,20 +81,5 @@ impl Drop for Bump {
                 current = next
             }
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::Bump;
-    //#[test]
-    fn unsync_bump() {
-        let mut bump = Bump::new(20).unwrap();
-
-        let mut n1 = bump.alloc(10usize).unwrap();
-        let mut n2 = bump.alloc(20usize).unwrap();
-        let mut n3 = bump.alloc(10i32).unwrap();
-
-        assert!(bump.alloc(10usize).is_err())
     }
 }
