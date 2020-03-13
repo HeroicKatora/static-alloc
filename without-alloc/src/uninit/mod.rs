@@ -5,7 +5,7 @@
 //!
 //! [wg-ref]: https://github.com/rust-lang/unsafe-code-guidelines/issues/77
 mod uninit;
+mod unique;
 mod ptr_layout;
 
 pub use uninit::{Uninit, UninitView};
-pub use ptr_layout::PtrLayout;
