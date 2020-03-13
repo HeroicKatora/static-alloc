@@ -845,23 +845,3 @@ unsafe impl<'alloc, T> LocalAlloc<'alloc> for Bump<T> {
         // We are a slab allocator and do not deallocate.
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn zst_no_drop() {
-        #[derive(Debug)]
-        struct PanicOnDrop;
-
-        impl Drop for PanicOnDrop {
-            fn drop(&mut self) {
-                panic!("No instance of this should ever get dropped");
-            }
-        }
-
-        let alloc = Bump::<()>::uninit();
-        let _ = alloc.leak(PanicOnDrop).unwrap();
-    }
-}

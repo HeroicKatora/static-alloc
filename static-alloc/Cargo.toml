@@ -17,6 +17,7 @@ alloc-traits = { path = "../alloc-traits", version = "0.1.0" }
 # For apis depending on "try_reserve" (#48043).
 # Currently only used in a test for ensure future opportunities.
 nightly_try_reserve = []
+alloc = []
 
 # Tests that test `Bump` as GlobalAlloc. Must be in a separate test each.
 [[test]]
@@ -33,6 +34,11 @@ name = "huuuuuge"
 path = "tests/alloc/huuuuuge.rs"
 # Disabled because it chokes rustc. Just a PoC.
 required-features = ["DISABLED"]
+
+[[test]]
+name = "unsync"
+path = "tests/unsync.rs"
+required-features = ["alloc"]
 
 [package.metadata.docs.rs]
 all-features = true
