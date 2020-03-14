@@ -9,12 +9,12 @@ use alloc::alloc::{alloc_zeroed, dealloc};
 
 use super::allocation::Allocation;
 
-pub(crate) type Link = Option<NonNull<Node>>;
+pub(crate) type Link = Option<NonNull<Bump>>;
 
-/// A Node represents an allocation block
+/// A Bump represents an allocation block
 /// in which any type can be allocated.
 #[repr(C)]
-pub struct Node {
+pub struct Bump {
     /// A pointer to the next node within the list.
     /// This is wrapped in a Cell, so we can modify
     /// this field with just an &self reference.
@@ -36,11 +36,11 @@ pub struct Node {
     data: [Cell<MaybeUninit<u8>>],
 }
 
-impl Node {
-    /// Returns the layout for the `header` of a `Node`.
+impl Bump {
+    /// Returns the layout for the `header` of a `Bump`.
     /// The definition of `header` in this case is all the
     /// fields that come **before** the `data` field.
-    /// If any of the fields of a Node are modified,
+    /// If any of the fields of a Bump are modified,
     /// this function likely has to be modified too.
     fn header_layout() -> Result<Layout, LayoutErr> {
         Layout::new::<Cell<Link>>()
@@ -55,7 +55,7 @@ impl Node {
             .map(|layout| layout.0)
     }
 
-    /// Returns a layout for a Node where the length of the data field is `size`.
+    /// Returns a layout for a Bump where the length of the data field is `size`.
     /// This relies on the two functions defined above.
     pub(crate) fn layout_from_size(size: usize) -> Result<Layout, LayoutErr> {
         let layout = Self::header_layout()?.extend(Self::data_layout(size)?)?.0;
@@ -63,38 +63,42 @@ impl Node {
     }
 }
 
-/// An `AllocFailure` represents failed allocation **of** a Node.
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, Ord, PartialOrd)]
-pub struct AllocFailure {
-    /// The size that could not be allocated
-    size: usize,
+/// The kind of failure while allocation a `Bump`.
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
+enum Failure {
+    RawAlloc,
+    Layout,
 }
 
-impl AllocFailure {
-    fn new(size: usize) -> Self {
-        Self { size }
+/// A type representing a failure while allocating
+/// a `Bump`.
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
+pub(crate) struct RawAllocError {
+    allocation_size: usize,
+    kind: Failure,
+}
+
+impl RawAllocError {
+    const fn new(allocation_size: usize, kind: Failure) -> Self {
+        Self {
+            allocation_size,
+            kind,
+        }
+    }
+
+    pub(crate) const fn allocation_size(&self) -> usize {
+        self.allocation_size
     }
 }
 
-/// An `AllocationError` represents a failure during the process
-/// of allocating a Node.
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, Ord, PartialOrd)]
-pub enum AllocationError {
-    /// A failed allocation of a Node
-    AllocationFailure(AllocFailure),
-
-    /// Anything else that went wrong during the proces
-    Other,
-}
-
-impl Node {
-    /// Given `layout`, allocates a Node and returns a pointer.
-    /// The Node will be initialized with zeroes.
-    unsafe fn alloc_raw(layout: Layout) -> Result<*mut u8, AllocFailure> {
+impl Bump {
+    /// Given `layout`, allocates a Bump and returns a pointer.
+    /// The Bump will be initialized with zeroes.
+    unsafe fn alloc_raw(layout: Layout) -> Result<*mut u8, RawAllocError> {
         let ptr = alloc_zeroed(layout);
 
         if ptr.is_null() {
-            return Err(AllocFailure::new(layout.size()));
+            return Err(RawAllocError::new(layout.size(), Failure::RawAlloc));
         } else {
             Ok(ptr)
         }
@@ -103,17 +107,19 @@ impl Node {
     /// Deallocates `this`
     pub(crate) unsafe fn dealloc(this: NonNull<Self>) {
         let size = this.as_ref().capacity();
-        let layout = Self::layout_from_size(size).unwrap();
+
+        let layout =
+            Self::layout_from_size(size).expect("Failed to construct layout for allocated Bump");
 
         dealloc(this.as_ptr() as *mut u8, layout);
     }
 }
 
-impl Node {
-    /// Returns capacity of this `Node`.
+impl Bump {
+    /// Returns capacity of this `Bump`.
     /// This is how many *bytes* can be allocated
     /// within this node.
-    pub(crate) fn capacity(&self) -> usize {
+    pub(crate) const fn capacity(&self) -> usize {
         self.data.len()
     }
 
@@ -129,16 +135,17 @@ impl Node {
         self.next.take()
     }
 
-    /// Allocates a Node and returns it.
-    pub(crate) fn alloc(size: usize) -> Result<NonNull<Self>, AllocationError> {
-        let layout = Self::layout_from_size(size).map_err(|_| AllocationError::Other)?;
+    /// Allocates a Bump and returns it.
+    pub(crate) fn alloc(size: usize) -> Result<NonNull<Self>, RawAllocError> {
+        let layout =
+            Self::layout_from_size(size).map_err(|_| RawAllocError::new(size, Failure::Layout))?;
 
         unsafe {
-            let ptr = Self::alloc_raw(layout).map_err(|error| AllocationError::AllocationFailure(error))?;
+            let ptr = Self::alloc_raw(layout)?;
 
             let raw_mut: *mut [Cell<MaybeUninit<u8>>] =
                 ptr::slice_from_raw_parts_mut(ptr.cast(), size);
-            let node_ptr = raw_mut as *mut Node;
+            let node_ptr = raw_mut as *mut Bump;
 
             Ok(NonNull::new_unchecked(node_ptr))
         }
@@ -151,7 +158,7 @@ fn next_power_of(n: usize, pow: usize) -> usize {
     [n, n + (pow - remain)][(remain != 0) as usize]
 }
 
-impl Node {
+impl Bump {
     /// Returns the start *address* of the data field
     fn data_start_address(&self) -> usize {
         self.data.as_ptr() as usize + self.index.get()
@@ -165,19 +172,26 @@ impl Node {
     }
 }
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, Ord, PartialOrd)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, PartialOrd)]
 pub struct BumpError<T> {
-    val: T
+    val: T,
 }
 
-impl <T> BumpError<T> {
-    fn new(val: T) -> Self {
+impl<T> BumpError<T> {
+    const fn new(val: T) -> Self {
         Self { val }
+    }
+
+    fn into_inner(self) -> T {
+        self.val
     }
 }
 
-impl Node {
-    pub(crate) fn push<'node, T>(&'node self, elem: T) -> Result<Allocation<'node, T>, BumpError<T>> {
+impl Bump {
+    pub(crate) fn push<'node, T>(
+        &'node self,
+        elem: T,
+    ) -> Result<Allocation<'node, T>, BumpError<T>> {
         let start = self.align_index_for::<T>();
         let ptr = match self
             .data

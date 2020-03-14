@@ -1,22 +1,22 @@
-use static_alloc::unsync::Bump;
+use static_alloc::unsync::Chain;
 
 #[test]
 fn unsync_bump() {
-    let bump = Bump::new(20).unwrap();
+    let chain = Chain::new(20).unwrap();
 
-    let mut n1 = bump.alloc(10usize).unwrap();
-    assert_eq!(bump.remaining_capacity(), 12);
+    let mut n1 = chain.try_alloc(10usize).unwrap();
+    assert_eq!(chain.remaining_capacity(), 12);
 
-    let mut n2 = bump.alloc(20usize).unwrap();
-    assert_eq!(bump.remaining_capacity(), 4);
+    let mut n2 = chain.try_alloc(20usize).unwrap();
+    assert_eq!(chain.remaining_capacity(), 4);
 
-    let mut n3 = bump.alloc(30i32).unwrap();
-    assert_eq!(bump.remaining_capacity(), 0);
+    let mut n3 = chain.try_alloc(30i32).unwrap();
+    assert_eq!(chain.remaining_capacity(), 0);
 
-    assert!(bump.alloc(10usize).is_err());
+    assert!(chain.try_alloc(10usize).is_err());
 
-    bump.chain(Bump::new(40).unwrap());
-    assert!(bump.alloc(10usize).is_ok());
+    chain.chain(Chain::new(40).unwrap());
+    assert!(chain.try_alloc(10usize).is_ok());
 
     *n1 += 1;
     *n2 += 2;

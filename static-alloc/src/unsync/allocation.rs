@@ -1,3 +1,5 @@
+//! This module contains an [`Allocation`]
+//! struct.
 use alloc_traits::AllocTime;
 
 use core::{
@@ -5,7 +7,7 @@ use core::{
     ptr::{self, NonNull},
 };
 
-/// Represents an allocation within a Node.
+/// Represents an allocation within a Bump.
 /// This is an owning pointer.
 #[allow(unused)]
 pub struct Allocation<'ctx, T> {

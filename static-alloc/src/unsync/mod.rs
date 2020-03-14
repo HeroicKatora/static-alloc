@@ -1,83 +1,91 @@
 //! This module defines a simple bump allocator.
 //! The allocator is not thread safe.
 
-mod node;
-mod allocation;
+pub mod allocation;
+mod bump;
 
-use node::{AllocationError, Node, BumpError};
 use allocation::Allocation;
+use bump::{Bump, BumpError, RawAllocError};
 
-use core::{
-    mem::ManuallyDrop,
-    ptr::{NonNull},
-    cell::Cell,
-};
+use core::{cell::Cell, mem::ManuallyDrop, ptr::NonNull};
 
-/// A `Bump` is a simple bump allocator, that draws
-/// it's memory from another allocator. Bump allocators
-/// can be chained together using [`Bump::chain`]. 
-pub struct Bump {
-    node: Cell<NonNull<Node>>
+/// An error representing an error while construction
+/// a [`Chain`].
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
+pub struct TryNewError {
+    inner: RawAllocError,
 }
 
-impl Bump {
-    /// Creates a new `Bump` that has a capacity of `size`
+impl TryNewError {
+    /// Returns the allocation size of a `Chain`
+    /// that couldn't be allocated.
+    pub const fn allocation_size(&self) -> usize {
+        self.inner.allocation_size()
+    }
+}
+
+/// A `Chain` is a simple bump allocator, that draws
+/// it's memory from another allocator. Chain allocators
+/// can be chained together using [`Chain::chain`].
+pub struct Chain {
+    bump: Cell<NonNull<Bump>>,
+}
+
+impl Chain {
+    /// Creates a new `Chain` that has a capacity of `size`
     /// bytes.
-    pub fn new(size: usize) -> Result<Self, AllocationError> {
-        Node::alloc(size).map(|node| Self {
-            node: Cell::new(node)
-        })
+    pub fn new(size: usize) -> Result<Self, TryNewError> {
+        Bump::alloc(size)
+            .map(|bump| Self {
+                bump: Cell::new(bump),
+            }).map_err(|e| TryNewError { inner: e })
     }
 
     /// Attempts to allocate `elem` within the allocator.
-    pub fn alloc<'bump, T>(&'bump self, elem: T) -> Result<Allocation<'bump, T>, BumpError<T>> {
+    pub fn try_alloc<'bump, T>(&'bump self, elem: T) -> Result<Allocation<'bump, T>, BumpError<T>> {
         unsafe {
-            let node_ptr = self.node.as_ptr();
-            (&*node_ptr).as_ref().push(elem)
+            let bump_ptr = self.bump.as_ptr();
+            (&*bump_ptr).as_ref().push(elem)
         }
     }
 
     /// Chains `self` together with `new`.
-    pub fn chain(&self, new: Bump) {
+    pub fn chain(&self, new: Chain) {
         let new: ManuallyDrop<_> = ManuallyDrop::new(new);
 
-        let self_node = self.node.get();
+        let self_bump = self.bump.get();
 
-        unsafe { new.node.get().as_ref().set_next(Some(self_node)) };
-        self.node.set(new.node.get())
+        unsafe { new.bump.get().as_ref().set_next(Some(self_bump)) };
+        self.bump.set(new.bump.get())
     }
 }
 
-impl Bump {
-    /// Returns the capacity of this `Bump`.
+impl Chain {
+    /// Returns the capacity of this `Chain`.
     /// This is how many *bytes* in total can
-    /// be allocated within this `Bump`.
+    /// be allocated within this `Chain`.
     pub fn capacity(&self) -> usize {
-        unsafe {
-            self.node.get().as_ref().capacity()
-        }
+        unsafe { self.bump.get().as_ref().capacity() }
     }
 
-    /// Returns the remaining capacity of this `Bump`.
+    /// Returns the remaining capacity of this `Chain`.
     /// This is how many more *bytes* can be allocated
-    /// within this `Bump`.
+    /// within this `Chain`.
     pub fn remaining_capacity(&self) -> usize {
-        let index = unsafe {
-            self.node.get().as_ref().current_index()
-        };
+        let index = unsafe { self.bump.get().as_ref().current_index() };
 
         self.capacity() - index
     }
 }
 
-impl Drop for Bump {
+impl Drop for Chain {
     fn drop(&mut self) {
-        let mut current = Some(self.node.get());
+        let mut current = Some(self.bump.get());
 
         while let Some(non_null) = current {
             unsafe {
                 let next = non_null.as_ref().take_next();
-                Node::dealloc(non_null);
+                Bump::dealloc(non_null);
                 current = next
             }
         }
