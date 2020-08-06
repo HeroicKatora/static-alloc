@@ -10,6 +10,11 @@ repository = "https://github.com/HeroicKatora/alloc-free"
 readme = "Readme.md"
 categories = ["embedded", "memory-management", "no-std"]
 
+[features]
+default = []
+# Enable features depending on `set_ptr_value` feature gate.
+nightly_set_ptr_value = []
+
 [dependencies]
 alloc-traits = { path = "../alloc-traits", version = "0.1.0" }
 

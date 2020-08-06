@@ -182,6 +182,80 @@ pub trait LocalAllocLeakExt<'alloc>: LocalAlloc<'alloc> {
             core::str::from_utf8_unchecked(bytes)
         })
     }
+
+    /// Allocate a copy of a generic dynamically sized type.
+    ///
+    /// This method takes a `ManuallyDrop<T>` wrapper instead of a `T` directly. These types are of
+    /// course layout compatible and you may soundly cast one reference type to the other. However
+    /// this choice forces acknowledgment that the value _must not_ be dropped by the caller
+    /// afterwards and makes this reasonably more safe in case of panics.
+    ///
+    /// Note further that mutable access is however explicitly _not_ required in contrast to
+    /// `ManuallyDrop::take`. Otherwise, the caller would have to ensure that the value is not
+    /// aliased and actually mutable. Keeping these guarantees often involves moving the value into
+    /// a new stack slot which is obviously not possible for dynamically sized values. This
+    /// interfaces promises not to overwrite any byte which does not restrict its functionality.
+    ///
+    /// # Safety
+    ///
+    /// This is quite unsafe and relies on the nightly `set_ptr_value` feature. Furthermore this
+    /// method does not require that `T` is in fact `Copy` as doing so would not be possible for
+    /// dynamically sized values. You must either require this bound on the expose interface or
+    /// must ensure the source value behind the pointer is not used further, not dropped and
+    /// basically discarded. You should act as if `take` had been called on the supplied value.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use static_alloc::Bump;
+    /// # use without_alloc::alloc::LocalAllocLeakExt;
+    /// use core::fmt::Debug;
+    /// use core::mem::ManuallyDrop;
+    ///
+    /// let slab: Bump<[u8; 16]> = Bump::uninit();
+    /// let debuggable = ManuallyDrop::new(1usize);
+    /// let debug = unsafe {
+    ///     slab.copy_dst::<dyn Debug>(&debuggable).unwrap()
+    /// };
+    /// assert_eq!(format!("{:?}", debug), "1");
+    /// ```
+    #[cfg(feature = "nightly_set_ptr_value")]
+    #[allow(unused_unsafe)]
+    unsafe fn copy_dst<T: ?Sized>(&'alloc self, val: &core::mem::ManuallyDrop<T>) -> Option<&'alloc mut T> {
+        let layout = alloc::Layout::for_value(val);
+        let uninit = match NonZeroLayout::from_layout(layout.into()) {
+            None => Uninit::invent_for_zst(),
+            Some(layout) => self.alloc_layout(layout)?.uninit,
+        };
+
+        unsafe {
+            // SAFETY:
+            // * the source is valid for reads for its own layout
+            // * the memory is valid for the same layout as val, so aligned and large enough
+            // * both are aligned, uninit due to allocator requirements
+            core::ptr::copy(val as *const _ as *const u8, uninit.as_ptr() as *mut u8, layout.size());
+        }
+
+        let ptr = val as *const _ as *const T;
+        let ptr = set_ptr_value(ptr, uninit.as_ptr()) as *mut T;
+        Some(unsafe {
+            // SAFETY: The byte copy above put the value into a valid state. Caller promises that
+            // we can logically move the value.
+            &mut *ptr
+        })
+    }
+}
+
+// FIXME: replace with std feature once on nightly.
+#[cfg(feature = "nightly_set_ptr_value")]
+fn set_ptr_value<T: ?Sized>(mut ptr: *const T, val: *const()) -> *const T {
+    let thin = &mut ptr as *mut *const T as *mut *const ();
+    // SAFETY: In case of a thin pointer, this operations is identical
+    // to a simple assignment. In case of a fat pointer, with the current
+    // fat pointer layout implementation, the first field of such a
+    // pointer is always the data pointer, which is likewise assigned.
+    unsafe { *thin = val };
+    ptr
 }
 
 impl<'alloc, T> LocalAllocLeakExt<'alloc> for T
