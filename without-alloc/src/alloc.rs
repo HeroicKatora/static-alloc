@@ -120,6 +120,68 @@ pub trait LocalAllocLeakExt<'alloc>: LocalAlloc<'alloc> {
         let alloc = self.alloc_layout(layout)?;
         Some(Rc::new(val, alloc.uninit))
     }
+
+    /// Allocate a slice of a copyable type.
+    ///
+    /// This will allocate some memory with the same layout as required by the slice, then copy all
+    /// values into the new allocation via a byte copy.
+    ///
+    /// ```
+    /// # use static_alloc::Bump;
+    /// # use without_alloc::alloc::LocalAllocLeakExt;
+    /// let slab: Bump<[usize; 16]> = Bump::uninit();
+    /// let data: &[u8] = b"Hello, World!";
+    ///
+    /// let slice = slab.copy_slice(data).unwrap();
+    /// assert_eq!(data, slice);
+    /// ```
+    fn copy_slice<T: Copy>(&'alloc self, slice: &[T]) -> Option<&'alloc mut [T]> {
+        let layout = alloc::Layout::for_value(slice);
+        let uninit = match NonZeroLayout::from_layout(layout.into()) {
+            None => Uninit::empty(),
+            Some(layout) => {
+                let allocation = self.alloc_layout(layout)?;
+                let right_type = allocation.cast_slice().unwrap();
+                right_type.uninit
+            }
+        };
+
+        unsafe {
+            // SAFETY:
+            // * the source is trivially valid for reads as it is a slice
+            // * the memory is valid for the same layout as slice, so aligned and large enough
+            // * both are aligned, uninit due to allocator requirements
+            core::ptr::copy(slice.as_ptr(), uninit.as_begin_ptr(), slice.len());
+        }
+
+        Some(unsafe {
+            // SAFETY: this is a copy of `slice` which is initialized.
+            uninit.into_mut()
+        })
+    }
+
+    /// Allocate a dynamically sized string.
+    ///
+    /// This will allocate some memory with the same layout as required by the string, then copy
+    /// all characters into the new allocation via a byte copy.
+    ///
+    /// ```
+    /// # use static_alloc::Bump;
+    /// # use without_alloc::alloc::LocalAllocLeakExt;
+    /// let slab: Bump<[u8; 16]> = Bump::uninit();
+    /// let data: &str = "Hello, World!";
+    ///
+    /// let slice = slab.copy_str(data).unwrap();
+    /// assert_eq!(data, slice);
+    /// ```
+    fn copy_str(&'alloc self, st: &str) -> Option<&'alloc str> {
+        let bytes = self.copy_slice(st.as_bytes())?;
+
+        Some(unsafe {
+            // SAFETY: this is a copy of `st` which is valid utf-8
+            core::str::from_utf8_unchecked(bytes)
+        })
+    }
 }
 
 impl<'alloc, T> LocalAllocLeakExt<'alloc> for T

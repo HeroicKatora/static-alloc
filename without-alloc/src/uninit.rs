@@ -272,6 +272,9 @@ impl<'a, T> Uninit<'a, T> {
     ///
     /// The resulting lifetime is bound to self so this behaves "as if" it were actually an
     /// instance of T that is getting borrowed. If a longer lifetime is needed, use `into_ref`.
+    ///
+    /// # Safety
+    /// The pointee must have been initialized through other means.
     pub unsafe fn as_ref(&self) -> &T {
         self.view.as_ref()
     }
@@ -280,16 +283,25 @@ impl<'a, T> Uninit<'a, T> {
     ///
     /// The resulting lifetime is bound to self so this behaves "as if" it were actually an
     /// instance of T that is getting borrowed. If a longer lifetime is needed, use `into_mut`.
+    ///
+    /// # Safety
+    /// The pointee must have been initialized through other means.
     pub unsafe fn as_mut(&mut self) -> &mut T {
         &mut *self.as_ptr()
     }
 
     /// Turn this into a reference to the content.
+    ///
+    /// # Safety
+    /// The pointee must have been initialized through other means.
     pub unsafe fn into_ref(self) -> &'a T {
         &*self.as_ptr()
     }
 
     /// Turn this into a mutable reference to the content.
+    ///
+    /// # Safety
+    /// The pointee must have been initialized through other means.
     pub unsafe fn into_mut(self) -> &'a mut T {
         &mut *self.as_ptr()
     }
@@ -422,6 +434,44 @@ impl<'a, T> Uninit<'a, [T]> {
                 self.as_begin_ptr() as *mut mem::MaybeUninit<T>,
                 self.capacity())
         }
+    }
+
+    /// Dereferences the content.
+    ///
+    /// The resulting lifetime is bound to self so this behaves "as if" it were actually an
+    /// instance of T that is getting borrowed. If a longer lifetime is needed, use `into_ref`.
+    ///
+    /// # Safety
+    /// The pointee must have been initialized through other means.
+    pub unsafe fn as_ref(&self) -> &[T] {
+        slice::from_raw_parts(self.as_begin_ptr(), self.capacity())
+    }
+
+    /// Mutably dereferences the content.
+    ///
+    /// The resulting lifetime is bound to self so this behaves "as if" it were actually an
+    /// instance of T that is getting borrowed. If a longer lifetime is needed, use `into_mut`.
+    ///
+    /// # Safety
+    /// The pointee must have been initialized through other means.
+    pub unsafe fn as_mut(&mut self) -> &mut [T] {
+        slice::from_raw_parts_mut(self.as_begin_ptr(), self.capacity())
+    }
+
+    /// Turn this into a reference to the content.
+    ///
+    /// # Safety
+    /// The pointee must have been initialized through other means.
+    pub unsafe fn into_ref(self) -> &'a [T] {
+        slice::from_raw_parts(self.as_begin_ptr(), self.capacity())
+    }
+
+    /// Turn this into a mutable reference to the content.
+    ///
+    /// # Safety
+    /// The pointee must have been initialized through other means.
+    pub unsafe fn into_mut(self) -> &'a mut [T] {
+        slice::from_raw_parts_mut(self.as_begin_ptr(), self.capacity())
     }
 }
 
