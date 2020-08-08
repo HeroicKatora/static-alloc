@@ -237,25 +237,13 @@ pub trait LocalAllocLeakExt<'alloc>: LocalAlloc<'alloc> {
         }
 
         let ptr = val as *const _ as *const T;
-        let ptr = set_ptr_value(ptr, uninit.as_ptr()) as *mut T;
+        let ptr = ptr.set_ptr_value(uninit.as_ptr()) as *mut T;
         Some(unsafe {
             // SAFETY: The byte copy above put the value into a valid state. Caller promises that
             // we can logically move the value.
             &mut *ptr
         })
     }
-}
-
-// FIXME: replace with std feature once on nightly.
-#[cfg(feature = "nightly_set_ptr_value")]
-fn set_ptr_value<T: ?Sized>(mut ptr: *const T, val: *const()) -> *const T {
-    let thin = &mut ptr as *mut *const T as *mut *const ();
-    // SAFETY: In case of a thin pointer, this operations is identical
-    // to a simple assignment. In case of a fat pointer, with the current
-    // fat pointer layout implementation, the first field of such a
-    // pointer is always the data pointer, which is likewise assigned.
-    unsafe { *thin = val };
-    ptr
 }
 
 impl<'alloc, T> LocalAllocLeakExt<'alloc> for T

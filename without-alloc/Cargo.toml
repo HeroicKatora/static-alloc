@@ -12,6 +12,10 @@ categories = ["embedded", "memory-management", "no-std"]
 
 [features]
 default = []
+
+# Nightly features might be removed in any new compiler OR new versions of the
+# library. Pin both exact versions if you intend to use them.
+#
 # Enable features depending on `set_ptr_value` feature gate.
 nightly_set_ptr_value = []
 

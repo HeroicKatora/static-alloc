@@ -28,9 +28,7 @@
 // Copyright 2019–2020 Andreas Molzer
 #![no_std]
 #![deny(missing_docs)]
-
-// FIXME: enable once it exists on nightly.
-// #[cfg_attr(feature = "nightly_set_ptr_value", feature(set_ptr_value))]
+#![cfg_attr(feature = "nightly_set_ptr_value", feature(set_ptr_value))]
 
 pub mod alloc;
 pub mod boxed;
