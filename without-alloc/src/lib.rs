@@ -25,9 +25,10 @@
 //!
 //! assert_eq!(num, 4);
 //! ```
-// Copyright 2019 Andreas Molzer
+// Copyright 2019–2020 Andreas Molzer
 #![no_std]
 #![deny(missing_docs)]
+#![cfg_attr(feature = "nightly_set_ptr_value", feature(set_ptr_value))]
 
 pub mod alloc;
 pub mod boxed;

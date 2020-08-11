@@ -120,6 +120,130 @@ pub trait LocalAllocLeakExt<'alloc>: LocalAlloc<'alloc> {
         let alloc = self.alloc_layout(layout)?;
         Some(Rc::new(val, alloc.uninit))
     }
+
+    /// Allocate a slice of a copyable type.
+    ///
+    /// This will allocate some memory with the same layout as required by the slice, then copy all
+    /// values into the new allocation via a byte copy.
+    ///
+    /// ```
+    /// # use static_alloc::Bump;
+    /// # use without_alloc::alloc::LocalAllocLeakExt;
+    /// let slab: Bump<[usize; 16]> = Bump::uninit();
+    /// let data: &[u8] = b"Hello, World!";
+    ///
+    /// let slice = slab.copy_slice(data).unwrap();
+    /// assert_eq!(data, slice);
+    /// ```
+    fn copy_slice<T: Copy>(&'alloc self, slice: &[T]) -> Option<&'alloc mut [T]> {
+        let layout = alloc::Layout::for_value(slice);
+        let uninit = match NonZeroLayout::from_layout(layout.into()) {
+            None => Uninit::empty(),
+            Some(layout) => {
+                let allocation = self.alloc_layout(layout)?;
+                let right_type = allocation.cast_slice().unwrap();
+                right_type.uninit
+            }
+        };
+
+        unsafe {
+            // SAFETY:
+            // * the source is trivially valid for reads as it is a slice
+            // * the memory is valid for the same layout as slice, so aligned and large enough
+            // * both are aligned, uninit due to allocator requirements
+            core::ptr::copy(slice.as_ptr(), uninit.as_begin_ptr(), slice.len());
+        }
+
+        Some(unsafe {
+            // SAFETY: this is a copy of `slice` which is initialized.
+            uninit.into_mut()
+        })
+    }
+
+    /// Allocate a dynamically sized string.
+    ///
+    /// This will allocate some memory with the same layout as required by the string, then copy
+    /// all characters into the new allocation via a byte copy.
+    ///
+    /// ```
+    /// # use static_alloc::Bump;
+    /// # use without_alloc::alloc::LocalAllocLeakExt;
+    /// let slab: Bump<[u8; 16]> = Bump::uninit();
+    /// let data: &str = "Hello, World!";
+    ///
+    /// let slice = slab.copy_str(data).unwrap();
+    /// assert_eq!(data, slice);
+    /// ```
+    fn copy_str(&'alloc self, st: &str) -> Option<&'alloc str> {
+        let bytes = self.copy_slice(st.as_bytes())?;
+
+        Some(unsafe {
+            // SAFETY: this is a copy of `st` which is valid utf-8
+            core::str::from_utf8_unchecked(bytes)
+        })
+    }
+
+    /// Allocate a copy of a generic dynamically sized type.
+    ///
+    /// This method takes a `ManuallyDrop<T>` wrapper instead of a `T` directly. These types are of
+    /// course layout compatible and you may soundly cast one reference type to the other. However
+    /// this choice forces acknowledgment that the value _must not_ be dropped by the caller
+    /// afterwards and makes this reasonably more safe in case of panics.
+    ///
+    /// Note further that mutable access is however explicitly _not_ required in contrast to
+    /// `ManuallyDrop::take`. Otherwise, the caller would have to ensure that the value is not
+    /// aliased and actually mutable. Keeping these guarantees often involves moving the value into
+    /// a new stack slot which is obviously not possible for dynamically sized values. This
+    /// interfaces promises not to overwrite any byte which does not restrict its functionality.
+    ///
+    /// # Safety
+    ///
+    /// This is quite unsafe and relies on the nightly `set_ptr_value` feature. Furthermore this
+    /// method does not require that `T` is in fact `Copy` as doing so would not be possible for
+    /// dynamically sized values. You must either require this bound on the expose interface or
+    /// must ensure the source value behind the pointer is not used further, not dropped and
+    /// basically discarded. You should act as if `take` had been called on the supplied value.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use static_alloc::Bump;
+    /// # use without_alloc::alloc::LocalAllocLeakExt;
+    /// use core::fmt::Debug;
+    /// use core::mem::ManuallyDrop;
+    ///
+    /// let slab: Bump<[u8; 16]> = Bump::uninit();
+    /// let debuggable = ManuallyDrop::new(1usize);
+    /// let debug = unsafe {
+    ///     slab.copy_dst::<dyn Debug>(&debuggable).unwrap()
+    /// };
+    /// assert_eq!(format!("{:?}", debug), "1");
+    /// ```
+    #[cfg(feature = "nightly_set_ptr_value")]
+    #[allow(unused_unsafe)]
+    unsafe fn copy_dst<T: ?Sized>(&'alloc self, val: &core::mem::ManuallyDrop<T>) -> Option<&'alloc mut T> {
+        let layout = alloc::Layout::for_value(val);
+        let uninit = match NonZeroLayout::from_layout(layout.into()) {
+            None => Uninit::invent_for_zst(),
+            Some(layout) => self.alloc_layout(layout)?.uninit,
+        };
+
+        unsafe {
+            // SAFETY:
+            // * the source is valid for reads for its own layout
+            // * the memory is valid for the same layout as val, so aligned and large enough
+            // * both are aligned, uninit due to allocator requirements
+            core::ptr::copy(val as *const _ as *const u8, uninit.as_ptr() as *mut u8, layout.size());
+        }
+
+        let ptr = val as *const _ as *const T;
+        let ptr = ptr.set_ptr_value(uninit.as_ptr()) as *mut T;
+        Some(unsafe {
+            // SAFETY: The byte copy above put the value into a valid state. Caller promises that
+            // we can logically move the value.
+            &mut *ptr
+        })
+    }
 }
 
 impl<'alloc, T> LocalAllocLeakExt<'alloc> for T
