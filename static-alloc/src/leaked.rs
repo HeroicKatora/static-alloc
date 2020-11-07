@@ -63,6 +63,110 @@ impl<'ctx, T> LeakBox<'ctx, T> {
         Self { pointer, lifetime, }
     }
 
+    /// Retrieve the raw pointer wrapped by this box.
+    ///
+    /// After this method the caller is responsible for managing the value in the place behind the
+    /// pointer. It will need to be dropped manually.
+    ///
+    /// # Usage
+    ///
+    /// You might manually drop the contained instance at a later point.
+    ///
+    /// ```
+    /// use static_alloc::{Bump, leaked::LeakBox};
+    ///
+    /// # fn fake() -> Option<()> {
+    /// let bump: Bump<[usize; 128]> = Bump::uninit();
+    /// let boxed = bump.boxed(String::from("Hello"))?;
+    /// let ptr = LeakBox::into_raw(boxed);
+    ///
+    /// unsafe {
+    ///     core::ptr::drop_in_place(ptr);
+    /// }
+    /// # Some(()) }
+    /// ```
+    ///
+    /// An alternative is to later re-wrap the pointer
+    ///
+    /// ```
+    /// use static_alloc::{Bump, leaked::LeakBox};
+    ///
+    /// # fn fake() -> Option<()> {
+    /// let bump: Bump<[usize; 128]> = Bump::uninit();
+    /// let boxed = bump.boxed(String::from("Hello"))?;
+    /// let ptr = LeakBox::into_raw(boxed);
+    ///
+    /// unsafe {
+    ///     let _ = LeakBox::from_raw(ptr);
+    /// };
+    /// # Some(()) }
+    /// ```
+    pub fn into_raw(this: Self) -> *mut T {
+        let this = ManuallyDrop::new(this);
+        this.pointer.as_ptr()
+    }
+
+    /// Wrap a raw pointer.
+    ///
+    /// The most immediate use is to rewrap a pointer returned from [`into_raw`].
+    ///
+    /// [`into_raw`]: #method.into_raw
+    ///
+    /// # Safety
+    ///
+    /// The pointer must point to a valid instance of `T` that is not aliased by any other
+    /// reference for the lifetime `'ctx`. In particular it must be valid aligned and initialized.
+    pub unsafe fn from_raw(pointer: *mut T) -> Self {
+        debug_assert!(!pointer.is_null(), "Null pointer passed to LeakBox::from_raw");
+        LeakBox {
+            lifetime: AllocTime::default(),
+            pointer: NonNull::new_unchecked(pointer),
+        }
+    }
+
+    /// Leak the instances as a mutable reference.
+    ///
+    /// After calling this method the value is no longer managed by `LeakBox`. Its Drop impl will
+    /// not be automatically called.
+    ///
+    /// # Usage
+    ///
+    /// ```
+    /// use static_alloc::{Bump, leaked::LeakBox};
+    ///
+    /// # fn fake() -> Option<()> {
+    /// let bump: Bump<[usize; 128]> = Bump::uninit();
+    /// let boxed = bump.boxed(String::from("Hello"))?;
+    ///
+    /// let st: &mut String = LeakBox::leak(boxed);
+    /// # Some(()) }
+    /// ```
+    ///
+    /// You can't leak past the lifetime of the allocator.
+    ///
+    /// ```compile_fail
+    /// # use static_alloc::{Bump, leaked::LeakBox};
+    /// # fn fake() -> Option<()> {
+    /// let bump: Bump<[usize; 128]> = Bump::uninit();
+    /// let boxed = bump.boxed(String::from("Hello"))?;
+    /// let st: &mut String = LeakBox::leak(boxed);
+    ///
+    /// drop(bump);
+    /// // error[E0505]: cannot move out of `bump` because it is borrowed
+    /// st.to_lowercase();
+    /// //-- borrow later used here
+    /// # Some(()) }
+    /// ```
+    pub fn leak<'a>(this: Self) -> &'a mut T
+        where 'ctx: 'a
+    {
+        let pointer = LeakBox::into_raw(this);
+        // SAFETY:
+        // * The LeakBox type guarantees this is initialized and not mutably aliased.
+        // * For the lifetime 'a which is at most 'ctx.
+        unsafe { &mut *pointer }
+    }
+
     /// Remove the value, forgetting the box in the process.
     ///
     /// This is similar to dereferencing a box (`*boxed`) but no deallocation is involved. This
