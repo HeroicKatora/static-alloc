@@ -2,6 +2,8 @@
 use alloc_traits::AllocTime;
 
 use core::{
+    fmt,
+    hash,
     mem::{ManuallyDrop, MaybeUninit},
     ops::{Deref, DerefMut},
     ptr::{self, NonNull},
@@ -14,12 +16,22 @@ use core::{
 ///
 /// # Usage
 ///
+/// This box can be used to manage one valid instance constructed within the memory provided by a
+/// `MaybeUninit` instance.
+///
+/// ```
+/// use core::mem::MaybeUninit;
+/// use static_alloc::leaked::LeakBox;
+///
+/// let mut storage = MaybeUninit::uninit();
+/// let boxed = LeakBox::from(&mut storage);
+/// // The string itself is not managed by `static_alloc`.
+/// let mut instance = LeakBox::write(boxed, String::new());
+///
+/// instance.push_str("Hello world!");
+/// ```
+///
 /// This box is the result of allocating from one of the `Bump` allocators using its explicit API.
-///
-/// ```
-/// use static_alloc::Bump;
-///
-/// ```
 ///
 /// Being a box-like type, an `Option` has the same size.
 ///
@@ -116,6 +128,8 @@ impl<'ctx, T> LeakBox<'ctx, T> {
     ///
     /// The pointer must point to a valid instance of `T` that is not aliased by any other
     /// reference for the lifetime `'ctx`. In particular it must be valid aligned and initialized.
+    /// Dropping this `LeakBox` will drop the instance, which the caller must also guarantee to be
+    /// sound.
     pub unsafe fn from_raw(pointer: *mut T) -> Self {
         debug_assert!(!pointer.is_null(), "Null pointer passed to LeakBox::from_raw");
         LeakBox {
@@ -251,7 +265,7 @@ impl<'ctx, T> LeakBox<'ctx, MaybeUninit<T>> {
     }
 }
 
-impl<'ctx, T> Deref for LeakBox<'ctx, T> {
+impl<'ctx, T: ?Sized> Deref for LeakBox<'ctx, T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
@@ -260,7 +274,7 @@ impl<'ctx, T> Deref for LeakBox<'ctx, T> {
     }
 }
 
-impl<'ctx, T> DerefMut for LeakBox<'ctx, T> {
+impl<'ctx, T: ?Sized> DerefMut for LeakBox<'ctx, T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         // SAFETY: constructor guarantees this is initialized and not aliased.
         unsafe { self.pointer.as_mut() }
@@ -273,3 +287,56 @@ impl<T: ?Sized> Drop for LeakBox<'_, T> {
         unsafe { ptr::drop_in_place(self.pointer.as_ptr()) }
     }
 }
+
+/// Construct a LeakBox to an existing MaybeUninit.
+///
+/// The MaybeUninit type is special in that we can treat any unique reference to an owned value as
+/// an owned value itself since it has no representational invariants.
+impl<'ctx, T> From<&'ctx mut MaybeUninit<T>> for LeakBox<'ctx, MaybeUninit<T>> {
+    fn from(uninit: &'ctx mut MaybeUninit<T>) -> Self {
+        // SAFETY:
+        // * An instance of MaybeUninit is always valid.
+        // * The mut references means it can not be aliased.
+        // * Dropping a MaybeUninit is a no-op and can not invalidate any validity or security
+        //   invariants of this MaybeUninit or the contained T.
+        unsafe { LeakBox::from_raw(uninit) }
+    }
+}
+
+impl<T: ?Sized> AsRef<T> for LeakBox<'_, T> {
+    fn as_ref(&self) -> &T {
+        &**self
+    }
+}
+
+impl<T: ?Sized> AsMut<T> for LeakBox<'_, T> {
+    fn as_mut(&mut self) -> &mut T {
+        &mut **self
+    }
+}
+
+impl<T: fmt::Debug + ?Sized> fmt::Debug for LeakBox<'_, T> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        self.as_ref().fmt(f)
+    }
+}
+
+impl<T: fmt::Display + ?Sized> fmt::Display for LeakBox<'_, T> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        self.as_ref().fmt(f)
+    }
+}
+
+impl<T: ?Sized> fmt::Pointer for LeakBox<'_, T> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        self.pointer.fmt(f)
+    }
+}
+
+impl<T: hash::Hash + ?Sized> hash::Hash for LeakBox<'_, T> {
+    fn hash<H: hash::Hasher>(&self, h: &mut H) {
+        self.as_ref().hash(h)
+    }
+}
+
+// TODO: iterators, read, write?

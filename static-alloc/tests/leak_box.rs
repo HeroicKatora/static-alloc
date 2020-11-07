@@ -41,3 +41,20 @@ fn init() {
     let init = LeakBox::write(boxed, 0usize);
     assert_eq!(*init, 0usize);
 }
+
+#[test]
+fn trait_impls() {
+    let mut memory = MaybeUninit::uninit();
+    let mut boxed = LeakBox::write(LeakBox::from(&mut memory), 0usize);
+
+    // AsMut and AsRef
+    *boxed.as_mut() = 1;
+    assert_eq!(1usize, *boxed.as_ref());
+    // Deref and DerefMut
+    *boxed = 2;
+    assert_eq!(2usize, *boxed);
+    // Debug, Display, Pointer
+    println!("{:?}", boxed);
+    println!("{}", boxed);
+    println!("{:p}", boxed);
+}
