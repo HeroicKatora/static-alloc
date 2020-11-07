@@ -465,6 +465,10 @@ impl<T> Bump<T> {
 
     /// Move a value into an owned allocation.
     ///
+    /// For safely initializing a value _after_ a successful allocation, see [`LeakBox::write`].
+    ///
+    /// [`LeakBox::write`]: ../leaked/struct.LeakBox.html#method.write
+    ///
     /// ## Usage
     ///
     /// This can be used to push the value into a caller provided stack buffer where it lives

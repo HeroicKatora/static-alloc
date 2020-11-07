@@ -2,6 +2,7 @@
 use alloc_traits::AllocTime;
 
 use core::{
+    mem::MaybeUninit,
     ops::{Deref, DerefMut},
     ptr::{self, NonNull},
 };
@@ -60,6 +61,51 @@ impl<'ctx, T> LeakBox<'ctx, T> {
         // * The allocation lives for at least `'ctx`.
         core::ptr::write(pointer.as_ptr(), val);
         Self { pointer, lifetime, }
+    }
+}
+
+impl<'ctx, T> LeakBox<'ctx, MaybeUninit<T>> {
+    /// Write a value into this box, initializing it.
+    ///
+    /// This can be used to delay the computation of a value until after an allocation succeeded
+    /// while maintaining all types necessary for a safe initialization.
+    ///
+    /// # Usage
+    ///
+    /// ```
+    /// # fn some_expensive_operation() -> [u8; 4] { [0u8; 4] }
+    /// # use core::mem::MaybeUninit;
+    /// #
+    /// # fn fake_main() -> Option<()> {
+    /// #
+    /// use static_alloc::{Bump, leaked::LeakBox};
+    ///
+    /// let bump: Bump<[usize; 128]> = Bump::uninit();
+    /// let memory = bump.boxed(MaybeUninit::uninit())?;
+    ///
+    /// let value = LeakBox::write(memory, some_expensive_operation());
+    /// # Some(()) } fn main() {}
+    /// ```
+    pub fn write(mut this: Self, val: T) -> LeakBox<'ctx, T> {
+        unsafe {
+            // SAFETY: MaybeUninit<T> is valid for writing a T.
+            ptr::write(this.as_mut_ptr(), val);
+            // SAFETY: initialized by the write before.
+            LeakBox::assume_init(this)
+        }
+    }
+
+    /// Converts to `LeakBox<T>`.
+    ///
+    /// # Safety
+    ///
+    /// The value must have been initialized as required by `MaybeUninit::assume_init`. Calling
+    /// this when the content is not yet fully initialized causes immediate undefined behavior.
+    pub unsafe fn assume_init(this: Self) -> LeakBox<'ctx, T> {
+        LeakBox {
+            pointer: this.pointer.cast(),
+            lifetime: this.lifetime,
+        }
     }
 }
 

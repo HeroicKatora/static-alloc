@@ -1,5 +1,5 @@
-use core::cell::RefCell;
-use static_alloc::Bump;
+use core::{cell::RefCell, mem::MaybeUninit};
+use static_alloc::{Bump, leaked::LeakBox};
 
 #[test]
 fn leak_box_drops() {
@@ -29,7 +29,15 @@ fn leaking() {
     }
 
     let bump: Bump<[usize; 1]> = Bump::uninit();
-    let boxed = bump.boxed(PanicOnDrop(0));
+    let boxed = bump.boxed(PanicOnDrop(0)).unwrap();
     core::mem::forget(boxed);
     // Panic averted.
+}
+
+#[test]
+fn init() {
+    let bump: Bump<[usize; 1]> = Bump::uninit();
+    let boxed = bump.boxed(MaybeUninit::uninit()).unwrap();
+    let init = LeakBox::write(boxed, 0usize);
+    assert_eq!(*init, 0usize);
 }
