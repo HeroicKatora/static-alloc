@@ -10,6 +10,7 @@ use core::mem::{self, MaybeUninit};
 use core::ptr::{NonNull, null_mut};
 use core::sync::atomic::{AtomicUsize, Ordering};
 
+use crate::leaked::LeakBox;
 use alloc_traits::{AllocTime, LocalAlloc, NonZeroLayout};
 
 /// Allocator drawing from an inner, statically sized memory resource.
@@ -459,6 +460,75 @@ impl<T> Bump<T> {
             ptr: ptr.cast(),
             lifetime,
             level,
+        })
+    }
+
+    /// Move a value into an owned allocation.
+    ///
+    /// ## Usage
+    ///
+    /// This can be used to push the value into a caller provided stack buffer where it lives
+    /// longer than the current stack frame. For example, you might create a linked list with a
+    /// dynamic number of values living in the frame below while still being dropped properly. This
+    /// is impossible to do with a return value.
+    ///
+    /// ```
+    /// # use static_alloc::Bump;
+    /// # use static_alloc::leaked::LeakBox;
+    /// fn rand() -> usize { 4 }
+    ///
+    /// enum Chain<'buf, T> {
+    ///    Tail,
+    ///    Link(T, LeakBox<'buf, Self>),
+    /// }
+    ///
+    /// fn make_chain<Buf, T>(buf: &Bump<Buf>, mut new_node: impl FnMut() -> T)
+    ///     -> Option<Chain<'_, T>>
+    /// {
+    ///     let count = rand();
+    ///     let mut chain = Chain::Tail;
+    ///     for _ in 0..count {
+    ///         let node = new_node();
+    ///         chain = Chain::Link(node, buf.boxed(chain)?);
+    ///     }
+    ///     Some(chain)
+    /// }
+    ///
+    /// struct Node (usize);
+    /// impl Drop for Node {
+    ///     fn drop(&mut self) {
+    ///         println!("Dropped {}", self.0);
+    ///     }
+    /// }
+    /// let mut counter = 0..;
+    /// let new_node = || Node(counter.next().unwrap());
+    ///
+    /// let buffer: Bump<[u8; 128]> = Bump::uninit();
+    /// let head = make_chain(&buffer, new_node).unwrap();
+    ///
+    /// // Prints the message in reverse order.
+    /// // Dropped 3
+    /// // Dropped 2
+    /// // Dropped 1
+    /// // Dropped 0
+    /// drop(head);
+    /// ```
+    pub fn boxed<V>(&self, val: V) -> Option<LeakBox<'_, V>> {
+        let Allocation { ptr, lifetime, .. } = self.get::<V>()?;
+        Some(unsafe {
+            LeakBox::new_from_raw_non_null(ptr, val, lifetime)
+        })
+    }
+
+    /// Move a value into an owned allocation.
+    ///
+    /// See [`boxed`] for usage.
+    ///
+    /// [`boxed`]: #method.boxed
+    pub fn boxed_at<V>(&self, val: V, level: Level) -> Result<LeakBox<'_, V>, Failure> {
+        let Allocation { ptr, lifetime, .. } = self.get_at::<V>(level)?;
+        Ok(unsafe {
+            LeakBox::new_from_raw_non_null(ptr, val, lifetime)
         })
     }
 

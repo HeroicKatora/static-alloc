@@ -1,7 +1,6 @@
 //! This module defines a simple bump allocator.
 //! The allocator is not thread safe.
 
-pub mod allocation;
 mod bump;
 
 use allocation::Allocation;
