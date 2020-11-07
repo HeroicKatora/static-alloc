@@ -2,7 +2,7 @@
 use alloc_traits::AllocTime;
 
 use core::{
-    mem::MaybeUninit,
+    mem::{ManuallyDrop, MaybeUninit},
     ops::{Deref, DerefMut},
     ptr::{self, NonNull},
 };
@@ -61,6 +61,44 @@ impl<'ctx, T> LeakBox<'ctx, T> {
         // * The allocation lives for at least `'ctx`.
         core::ptr::write(pointer.as_ptr(), val);
         Self { pointer, lifetime, }
+    }
+
+    /// Remove the value, forgetting the box in the process.
+    ///
+    /// This is similar to dereferencing a box (`*boxed`) but no deallocation is involved. This
+    /// becomes useful when the allocator turns out to have too short of a lifetime.
+    ///
+    /// # Usage
+    ///
+    /// You may want to move a long-lived value out of the current scope where it's been allocated.
+    ///
+    /// ```
+    /// # use core::cell::RefCell;
+    /// use static_alloc::{Bump, leaked::LeakBox};
+    ///
+    /// let cell = RefCell::new(0usize);
+    ///
+    /// let guard = {
+    ///     let bump: Bump<[usize; 128]> = Bump::uninit();
+    ///
+    ///     let mut leaked = bump.boxed(cell.borrow_mut()).unwrap();
+    ///     **leaked = 1usize;
+    ///
+    ///     // Take the value, allowing use independent of the lifetime of bump
+    ///     LeakBox::take(leaked)
+    /// };
+    ///
+    /// assert!(cell.try_borrow().is_err());
+    /// drop(guard);
+    /// assert!(cell.try_borrow().is_ok());
+    /// ```
+    pub fn take(this: Self) -> T {
+        // Do not drop this.
+        let this = ManuallyDrop::new(this);
+        // SAFETY:
+        // * `ptr` points to an initialized allocation according to the constructors of `LeakBox`.
+        // * The old value is forgotten and no longer dropped.
+        unsafe { core::ptr::read(this.pointer.as_ptr()) }
     }
 }
 
