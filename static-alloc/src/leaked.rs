@@ -218,6 +218,24 @@ impl<'ctx, T> LeakBox<'ctx, T> {
         // * The old value is forgotten and no longer dropped.
         unsafe { core::ptr::read(this.pointer.as_ptr()) }
     }
+
+    /// Wrap a mutable reference to a trivial value as if it were a box.
+    ///
+    /// This is safe because such values can not have any Drop code and can be duplicated at will.
+    ///
+    /// The usefulness of this operation is questionable but the author would be delighted to hear
+    /// about any actual use case.
+    pub fn from_mut(val: &'ctx mut T) -> Self
+    where
+        T: Copy
+    {
+        // SAFETY:
+        // * Is valid instance
+        // * Not aliased as by mut reference
+        // * Dropping is a no-op
+        // * We don't invalidate anyones value
+        unsafe { LeakBox::from_raw(val) }
+    }
 }
 
 impl<'ctx, T> LeakBox<'ctx, MaybeUninit<T>> {

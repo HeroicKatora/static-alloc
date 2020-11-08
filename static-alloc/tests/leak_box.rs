@@ -58,3 +58,12 @@ fn trait_impls() {
     println!("{}", boxed);
     println!("{:p}", boxed);
 }
+
+#[test]
+fn questionable_copy() {
+    let mut value = 0;
+    let mut quote_boxed_unquote = LeakBox::from_mut(&mut value);
+    *quote_boxed_unquote = 1;
+    drop(quote_boxed_unquote);
+    assert_eq!(value, 1)
+}
