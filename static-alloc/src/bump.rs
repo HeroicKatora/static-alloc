@@ -493,7 +493,7 @@ impl<T> Bump<T> {
     ///     let mut chain = Chain::Tail;
     ///     for _ in 0..count {
     ///         let node = new_node();
-    ///         chain = Chain::Link(node, buf.boxed(chain)?);
+    ///         chain = Chain::Link(node, buf.leak_box(chain)?);
     ///     }
     ///     Some(chain)
     /// }
@@ -517,7 +517,7 @@ impl<T> Bump<T> {
     /// // Dropped 0
     /// drop(head);
     /// ```
-    pub fn boxed<V>(&self, val: V) -> Option<LeakBox<'_, V>> {
+    pub fn leak_box<V>(&self, val: V) -> Option<LeakBox<'_, V>> {
         let Allocation { ptr, lifetime, .. } = self.get::<V>()?;
         Some(unsafe {
             LeakBox::new_from_raw_non_null(ptr, val, lifetime)
@@ -526,10 +526,10 @@ impl<T> Bump<T> {
 
     /// Move a value into an owned allocation.
     ///
-    /// See [`boxed`] for usage.
+    /// See [`leak_box`] for usage.
     ///
-    /// [`boxed`]: #method.boxed
-    pub fn boxed_at<V>(&self, val: V, level: Level) -> Result<LeakBox<'_, V>, Failure> {
+    /// [`leak_box`]: #method.leak_box
+    pub fn leak_box_at<V>(&self, val: V, level: Level) -> Result<LeakBox<'_, V>, Failure> {
         let Allocation { ptr, lifetime, .. } = self.get_at::<V>(level)?;
         Ok(unsafe {
             LeakBox::new_from_raw_non_null(ptr, val, lifetime)

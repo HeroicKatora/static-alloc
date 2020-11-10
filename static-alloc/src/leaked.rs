@@ -24,9 +24,9 @@ use core::{
 /// use static_alloc::leaked::LeakBox;
 ///
 /// let mut storage = MaybeUninit::uninit();
-/// let boxed = LeakBox::from(&mut storage);
+/// let leak_box = LeakBox::from(&mut storage);
 /// // The string itself is not managed by `static_alloc`.
-/// let mut instance = LeakBox::write(boxed, String::new());
+/// let mut instance = LeakBox::write(leak_box, String::new());
 ///
 /// instance.push_str("Hello world!");
 /// ```
@@ -89,8 +89,8 @@ impl<'ctx, T> LeakBox<'ctx, T> {
     ///
     /// # fn fake() -> Option<()> {
     /// let bump: Bump<[usize; 128]> = Bump::uninit();
-    /// let boxed = bump.boxed(String::from("Hello"))?;
-    /// let ptr = LeakBox::into_raw(boxed);
+    /// let leak_box = bump.leak_box(String::from("Hello"))?;
+    /// let ptr = LeakBox::into_raw(leak_box);
     ///
     /// unsafe {
     ///     core::ptr::drop_in_place(ptr);
@@ -105,8 +105,8 @@ impl<'ctx, T> LeakBox<'ctx, T> {
     ///
     /// # fn fake() -> Option<()> {
     /// let bump: Bump<[usize; 128]> = Bump::uninit();
-    /// let boxed = bump.boxed(String::from("Hello"))?;
-    /// let ptr = LeakBox::into_raw(boxed);
+    /// let leak_box = bump.leak_box(String::from("Hello"))?;
+    /// let ptr = LeakBox::into_raw(leak_box);
     ///
     /// unsafe {
     ///     let _ = LeakBox::from_raw(ptr);
@@ -150,9 +150,9 @@ impl<'ctx, T> LeakBox<'ctx, T> {
     ///
     /// # fn fake() -> Option<()> {
     /// let bump: Bump<[usize; 128]> = Bump::uninit();
-    /// let boxed = bump.boxed(String::from("Hello"))?;
+    /// let leak_box = bump.leak_box(String::from("Hello"))?;
     ///
-    /// let st: &mut String = LeakBox::leak(boxed);
+    /// let st: &mut String = LeakBox::leak(leak_box);
     /// # Some(()) }
     /// ```
     ///
@@ -162,8 +162,8 @@ impl<'ctx, T> LeakBox<'ctx, T> {
     /// # use static_alloc::{Bump, leaked::LeakBox};
     /// # fn fake() -> Option<()> {
     /// let bump: Bump<[usize; 128]> = Bump::uninit();
-    /// let boxed = bump.boxed(String::from("Hello"))?;
-    /// let st: &mut String = LeakBox::leak(boxed);
+    /// let leak_box = bump.leak_box(String::from("Hello"))?;
+    /// let st: &mut String = LeakBox::leak(leak_box);
     ///
     /// drop(bump);
     /// // error[E0505]: cannot move out of `bump` because it is borrowed
@@ -183,7 +183,7 @@ impl<'ctx, T> LeakBox<'ctx, T> {
 
     /// Remove the value, forgetting the box in the process.
     ///
-    /// This is similar to dereferencing a box (`*boxed`) but no deallocation is involved. This
+    /// This is similar to dereferencing a box (`*leak_box`) but no deallocation is involved. This
     /// becomes useful when the allocator turns out to have too short of a lifetime.
     ///
     /// # Usage
@@ -199,7 +199,7 @@ impl<'ctx, T> LeakBox<'ctx, T> {
     /// let guard = {
     ///     let bump: Bump<[usize; 128]> = Bump::uninit();
     ///
-    ///     let mut leaked = bump.boxed(cell.borrow_mut()).unwrap();
+    ///     let mut leaked = bump.leak_box(cell.borrow_mut()).unwrap();
     ///     **leaked = 1usize;
     ///
     ///     // Take the value, allowing use independent of the lifetime of bump
@@ -255,7 +255,7 @@ impl<'ctx, T> LeakBox<'ctx, MaybeUninit<T>> {
     /// use static_alloc::{Bump, leaked::LeakBox};
     ///
     /// let bump: Bump<[usize; 128]> = Bump::uninit();
-    /// let memory = bump.boxed(MaybeUninit::uninit())?;
+    /// let memory = bump.leak_box(MaybeUninit::uninit())?;
     ///
     /// let value = LeakBox::write(memory, some_expensive_operation());
     /// # Some(()) } fn main() {}
