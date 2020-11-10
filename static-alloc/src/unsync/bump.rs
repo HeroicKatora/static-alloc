@@ -8,7 +8,7 @@ use core::{
 use alloc::alloc::{alloc_zeroed, dealloc};
 use alloc_traits::AllocTime;
 
-use super::leaked::LeakBox;
+use crate::leaked::LeakBox;
 
 pub(crate) type Link = Option<NonNull<Bump>>;
 
@@ -201,13 +201,16 @@ impl Bump {
             .map(|place| {
                 let ptr = place.as_ptr() as *mut T;
                 assert!(ptr as usize % mem::align_of::<T>() == 0);
+                // TODO: use NonNull<[u8]>::as_non_null_ptr().cast()
+                // as soon as `slice_ptr_get` is stable
                 ptr
             }) {
             Some(ptr) => ptr,
             None => return Err(BumpError::new(elem)),
         };
 
-
+        debug_assert!(!ptr.is_null());
+        let ptr = NonNull::new(ptr).unwrap();
         // `end` should never overflow becouse of the slicing
         // above. If somehow it *does* overflow, saturate at
         // the max value, which is caught in a next `push` call.
@@ -216,7 +219,7 @@ impl Bump {
 
         let lifetime: AllocTime<'node> = AllocTime::default();
         Ok(unsafe {
-            LeakBox::new(ptr, elem, lifetime)
+            LeakBox::new_from_raw_non_null(ptr, elem, lifetime)
         })
     }
 }
