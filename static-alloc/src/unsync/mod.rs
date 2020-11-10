@@ -1,13 +1,12 @@
 //! This module defines a simple bump allocator.
 //! The allocator is not thread safe.
 
-pub mod allocation;
 mod bump;
 
-use allocation::Allocation;
-use bump::{Bump, BumpError, RawAllocError};
-
 use core::{cell::Cell, mem::ManuallyDrop, ptr::NonNull};
+
+use bump::{Bump, BumpError, RawAllocError};
+use crate::leaked::LeakBox;
 
 /// An error representing an error while construction
 /// a [`Chain`].
@@ -42,7 +41,7 @@ impl Chain {
     }
 
     /// Attempts to allocate `elem` within the allocator.
-    pub fn try_alloc<'bump, T>(&'bump self, elem: T) -> Result<Allocation<'bump, T>, BumpError<T>> {
+    pub fn try_alloc<'bump, T>(&'bump self, elem: T) -> Result<LeakBox<'bump, T>, BumpError<T>> {
         unsafe {
             let bump_ptr = self.bump.as_ptr();
             (&*bump_ptr).as_ref().push(elem)

@@ -6,8 +6,9 @@ use core::{
 };
 
 use alloc::alloc::{alloc_zeroed, dealloc};
+use alloc_traits::AllocTime;
 
-use super::allocation::Allocation;
+use crate::leaked::LeakBox;
 
 pub(crate) type Link = Option<NonNull<Bump>>;
 
@@ -191,7 +192,7 @@ impl Bump {
     pub(crate) fn push<'node, T>(
         &'node self,
         elem: T,
-    ) -> Result<Allocation<'node, T>, BumpError<T>> {
+    ) -> Result<LeakBox<'node, T>, BumpError<T>> {
         let start = self.align_index_for::<T>();
         let ptr = match self
             .data
@@ -200,21 +201,25 @@ impl Bump {
             .map(|place| {
                 let ptr = place.as_ptr() as *mut T;
                 assert!(ptr as usize % mem::align_of::<T>() == 0);
+                // TODO: use NonNull<[u8]>::as_non_null_ptr().cast()
+                // as soon as `slice_ptr_get` is stable
                 ptr
             }) {
             Some(ptr) => ptr,
             None => return Err(BumpError::new(elem)),
         };
 
-        unsafe {
-            ptr.write(elem);
-        }
-
+        debug_assert!(!ptr.is_null());
+        let ptr = NonNull::new(ptr).unwrap();
         // `end` should never overflow becouse of the slicing
         // above. If somehow it *does* overflow, saturate at
         // the max value, which is caught in a next `push` call.
         let end = start.saturating_add(mem::size_of::<T>());
         self.index.set(end);
-        Ok(Allocation::new(ptr))
+
+        let lifetime: AllocTime<'node> = AllocTime::default();
+        Ok(unsafe {
+            LeakBox::new_from_raw_non_null(ptr, elem, lifetime)
+        })
     }
 }
