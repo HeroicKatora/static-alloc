@@ -2,25 +2,17 @@ use core::{
     alloc::{Layout, LayoutErr},
     cell::Cell,
     mem::{self, MaybeUninit},
-    ptr::{self, NonNull},
+    ptr::NonNull,
 };
 
-use alloc::alloc::{alloc_zeroed, dealloc};
 use alloc_traits::AllocTime;
 
 use crate::leaked::LeakBox;
-
-pub(crate) type Link = Option<NonNull<Bump>>;
 
 /// A Bump represents an allocation block
 /// in which any type can be allocated.
 #[repr(C)]
 pub struct Bump {
-    /// A pointer to the next node within the list.
-    /// This is wrapped in a Cell, so we can modify
-    /// this field with just an &self reference.
-    next: Cell<Link>,
-
     /// An index into the data field. This index
     /// will always be an index to an element
     /// that has not been allocated into.
@@ -43,10 +35,8 @@ impl Bump {
     /// fields that come **before** the `data` field.
     /// If any of the fields of a Bump are modified,
     /// this function likely has to be modified too.
-    fn header_layout() -> Result<Layout, LayoutErr> {
-        Layout::new::<Cell<Link>>()
-            .extend(Layout::new::<Cell<usize>>())
-            .map(|layout| layout.0)
+    fn header_layout() -> Layout {
+        Layout::new::<Cell<usize>>()
     }
 
     /// Returns the layout for an array with the size of `size`
@@ -59,60 +49,9 @@ impl Bump {
     /// Returns a layout for a Bump where the length of the data field is `size`.
     /// This relies on the two functions defined above.
     pub(crate) fn layout_from_size(size: usize) -> Result<Layout, LayoutErr> {
-        let layout = Self::header_layout()?.extend(Self::data_layout(size)?)?.0;
+        let data_tail = Self::data_layout(size)?;
+        let (layout, _) = Self::header_layout().extend(data_tail)?;
         Ok(layout.pad_to_align())
-    }
-}
-
-/// The kind of failure while allocation a `Bump`.
-#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
-enum Failure {
-    RawAlloc,
-    Layout,
-}
-
-/// A type representing a failure while allocating
-/// a `Bump`.
-#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
-pub(crate) struct RawAllocError {
-    allocation_size: usize,
-    kind: Failure,
-}
-
-impl RawAllocError {
-    const fn new(allocation_size: usize, kind: Failure) -> Self {
-        Self {
-            allocation_size,
-            kind,
-        }
-    }
-
-    pub(crate) const fn allocation_size(&self) -> usize {
-        self.allocation_size
-    }
-}
-
-impl Bump {
-    /// Given `layout`, allocates a Bump and returns a pointer.
-    /// The Bump will be initialized with zeroes.
-    unsafe fn alloc_raw(layout: Layout) -> Result<*mut u8, RawAllocError> {
-        let ptr = alloc_zeroed(layout);
-
-        if ptr.is_null() {
-            return Err(RawAllocError::new(layout.size(), Failure::RawAlloc));
-        } else {
-            Ok(ptr)
-        }
-    }
-
-    /// Deallocates `this`
-    pub(crate) unsafe fn dealloc(this: NonNull<Self>) {
-        let size = this.as_ref().capacity();
-
-        let layout =
-            Self::layout_from_size(size).expect("Failed to construct layout for allocated Bump");
-
-        dealloc(this.as_ptr() as *mut u8, layout);
     }
 }
 
@@ -126,30 +65,6 @@ impl Bump {
 
     pub(crate) fn current_index(&self) -> usize {
         self.index.get()
-    }
-
-    pub(crate) fn set_next(&self, next: Link) {
-        self.next.set(next);
-    }
-
-    pub(crate) fn take_next(&self) -> Link {
-        self.next.take()
-    }
-
-    /// Allocates a Bump and returns it.
-    pub(crate) fn alloc(size: usize) -> Result<NonNull<Self>, RawAllocError> {
-        let layout =
-            Self::layout_from_size(size).map_err(|_| RawAllocError::new(size, Failure::Layout))?;
-
-        unsafe {
-            let ptr = Self::alloc_raw(layout)?;
-
-            let raw_mut: *mut [Cell<MaybeUninit<u8>>] =
-                ptr::slice_from_raw_parts_mut(ptr.cast(), size);
-            let node_ptr = raw_mut as *mut Bump;
-
-            Ok(NonNull::new_unchecked(node_ptr))
-        }
     }
 }
 
