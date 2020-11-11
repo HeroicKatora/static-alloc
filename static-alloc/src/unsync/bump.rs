@@ -41,9 +41,7 @@ impl Bump {
 
     /// Returns the layout for an array with the size of `size`
     fn data_layout(size: usize) -> Result<Layout, LayoutErr> {
-        Layout::new::<Cell<MaybeUninit<u8>>>()
-            .repeat(size)
-            .map(|layout| layout.0)
+        Layout::array::<Cell<MaybeUninit<u8>>>(size)
     }
 
     /// Returns a layout for a Bump where the length of the data field is `size`.
@@ -86,24 +84,7 @@ impl Bump {
         let aligned_index = aligned_start - self.data.as_ptr() as usize;
         aligned_index
     }
-}
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, PartialOrd)]
-pub struct BumpError<T> {
-    val: T,
-}
-
-impl<T> BumpError<T> {
-    const fn new(val: T) -> Self {
-        Self { val }
-    }
-
-    pub fn into_inner(self) -> T {
-        self.val
-    }
-}
-
-impl Bump {
     pub(crate) fn push<'node, T>(
         &'node self,
         elem: T,
@@ -136,5 +117,20 @@ impl Bump {
         Ok(unsafe {
             LeakBox::new_from_raw_non_null(ptr, elem, lifetime)
         })
+    }
+}
+
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, PartialOrd)]
+pub struct BumpError<T> {
+    val: T,
+}
+
+impl<T> BumpError<T> {
+    const fn new(val: T) -> Self {
+        Self { val }
+    }
+
+    pub fn into_inner(self) -> T {
+        self.val
     }
 }

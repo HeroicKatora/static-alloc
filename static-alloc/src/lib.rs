@@ -40,7 +40,6 @@ pub mod bump;
 pub use bump::Bump;
 pub mod leaked;
 
-#[cfg(feature = "alloc")]
 /// An unsynchronized allocator.
 pub mod unsync;
 
