@@ -1,18 +1,38 @@
 use core::{
     alloc::{Layout, LayoutErr},
-    cell::Cell,
+    cell::{Cell, UnsafeCell},
     mem::{self, MaybeUninit},
-    ptr::NonNull,
+    ops,
+    ptr::{self, NonNull},
 };
 
 use alloc_traits::AllocTime;
 
 use crate::leaked::LeakBox;
 
-/// A Bump represents an allocation block
-/// in which any type can be allocated.
+/// A bump allocator whose storage capacity and alignment is given by `T`.
+///
+/// This type dereferences to the generic `MemBump` that implements the allocation behavior. Note
+/// that `MemBump` is an unsized type. In contrast this type is sized so it is possible to
+/// construct an instance on the stack or leak one from another bump allocator such as a global
+/// one.
+///
+/// # Usage
+///
+/// ```
+/// ```
 #[repr(C)]
-pub struct Bump {
+pub struct Bump<T> {
+    /// The index used in allocation.
+    _index: Cell<usize>,
+    /// The backing storage for raw allocated data.
+    _data: UnsafeCell<MaybeUninit<T>>,
+    // Warning: when changing the data layout, you must change `MemBump` as well.
+}
+
+/// A dynamically sized allocation block in which any type can be allocated.
+#[repr(C)]
+pub struct MemBump {
     /// An index into the data field. This index
     /// will always be an index to an element
     /// that has not been allocated into.
@@ -26,14 +46,36 @@ pub struct Bump {
     /// a Cell<MaybeUninit> to allow modification
     /// trough a &self reference, and to allow
     /// writing uninit padding bytes.
-    data: [Cell<MaybeUninit<u8>>],
+    data: [UnsafeCell<MaybeUninit<u8>>],
 }
 
-impl Bump {
-    /// Returns the layout for the `header` of a `Bump`.
+impl<T> Bump<T> {
+    /// Create an allocator with uninitialized memory.
+    ///
+    /// All allocations coming from the allocator will need to be initialized manually.
+    pub fn uninit() -> Self {
+        Bump {
+            _index: Cell::new(0),
+            _data: UnsafeCell::new(MaybeUninit::uninit()),
+        }
+    }
+
+    /// Create an allocator with zeroed memory.
+    ///
+    /// The caller can rely on all allocations to be zeroed.
+    pub fn zeroed() -> Self {
+        Bump {
+            _index: Cell::new(0),
+            _data: UnsafeCell::new(MaybeUninit::zeroed()),
+        }
+    }
+}
+
+impl MemBump {
+    /// Returns the layout for the `header` of a `MemBump`.
     /// The definition of `header` in this case is all the
     /// fields that come **before** the `data` field.
-    /// If any of the fields of a Bump are modified,
+    /// If any of the fields of a MemBump are modified,
     /// this function likely has to be modified too.
     fn header_layout() -> Layout {
         Layout::new::<Cell<usize>>()
@@ -44,7 +86,7 @@ impl Bump {
         Layout::array::<Cell<MaybeUninit<u8>>>(size)
     }
 
-    /// Returns a layout for a Bump where the length of the data field is `size`.
+    /// Returns a layout for a MemBump where the length of the data field is `size`.
     /// This relies on the two functions defined above.
     pub(crate) fn layout_from_size(size: usize) -> Result<Layout, LayoutErr> {
         let data_tail = Self::data_layout(size)?;
@@ -53,8 +95,8 @@ impl Bump {
     }
 }
 
-impl Bump {
-    /// Returns capacity of this `Bump`.
+impl MemBump {
+    /// Returns capacity of this `MemBump`.
     /// This is how many *bytes* can be allocated
     /// within this node.
     pub(crate) const fn capacity(&self) -> usize {
@@ -72,7 +114,7 @@ fn next_power_of(n: usize, pow: usize) -> usize {
     [n, n + (pow - remain)][(remain != 0) as usize]
 }
 
-impl Bump {
+impl MemBump {
     /// Returns the start *address* of the data field
     fn data_start_address(&self) -> usize {
         self.data.as_ptr() as usize + self.index.get()
@@ -133,4 +175,28 @@ impl<T> BumpError<T> {
     pub fn into_inner(self) -> T {
         self.val
     }
+}
+
+impl<T> ops::Deref for Bump<T> {
+    type Target = MemBump;
+    fn deref(&self) -> &MemBump {
+        let from_layout = Layout::for_value(self);
+        let data_layout = Layout::new::<MaybeUninit<T>>();
+        // Construct a point with the meta data of a slice to `data`, but pointing to the whole
+        // struct instead. This meta data is later copied to the meta data of `bump` when cast.
+        let ptr = self as *const Self as *const MaybeUninit<u8>;
+        let mem: *const [MaybeUninit<u8>] =
+            ptr::slice_from_raw_parts(ptr, data_layout.size());
+        // Now we have a pointer to MemBump with length meta data of the data slice.
+        let bump = unsafe { &*(mem as *const MemBump) };
+        debug_assert_eq!(from_layout, Layout::for_value(bump));
+        bump
+    }
+}
+
+#[test]
+fn mem_bump_derefs_correctly() {
+    let bump = Bump::<usize>::zeroed();
+    let mem: &MemBump = &bump;
+    assert_eq!(mem::size_of_val(&bump), mem::size_of_val(mem));
 }

@@ -3,13 +3,13 @@
 use core::{
     alloc::{Layout, LayoutErr},
     cell::Cell,
-    mem::{self, ManuallyDrop, MaybeUninit},
+    mem::{ManuallyDrop, MaybeUninit},
     ptr::{self, NonNull},
 };
 
 use alloc::alloc::{alloc_zeroed, dealloc};
 
-use crate::unsync::bump::{Bump, BumpError};
+use crate::unsync::bump::{MemBump, BumpError};
 use crate::leaked::LeakBox;
 
 /// An error representing an error while construction
@@ -35,7 +35,7 @@ struct Link {
     /// this field with just an &self reference.
     next: Cell<LinkPtr>,
     /// The bump allocator of this link.
-    bump: Bump,
+    bump: MemBump,
 }
 
 /// A `Chain` is a simple bump allocator, that draws
@@ -93,7 +93,7 @@ impl Chain {
     }
 }
 
-/// The kind of failure while allocation a `Bump`.
+/// The kind of failure while allocation a `MemBump`.
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
 enum Failure {
     RawAlloc,
@@ -101,7 +101,7 @@ enum Failure {
 }
 
 /// A type representing a failure while allocating
-/// a `Bump`.
+/// a `MemBump`.
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
 pub(crate) struct RawAllocError {
     allocation_size: usize,
@@ -117,18 +117,18 @@ impl Link {
         self.next.take()
     }
 
-    pub(crate) fn as_bump(&self) -> &Bump {
+    pub(crate) fn as_bump(&self) -> &MemBump {
         &self.bump
     }
 
     pub(crate) fn layout_from_size(size: usize) -> Result<Layout, LayoutErr> {
         Layout::new::<Cell<LinkPtr>>()
-            .extend(Bump::layout_from_size(size)?)
+            .extend(MemBump::layout_from_size(size)?)
             .map(|layout| layout.0)
     }
 
-    /// Given `layout`, allocates a Bump and returns a pointer.
-    /// The Bump will be initialized with zeroes.
+    /// Given `layout`, allocates a MemBump and returns a pointer.
+    /// The MemBump will be initialized with zeroes.
     unsafe fn alloc_raw(layout: Layout) -> Result<*mut u8, RawAllocError> {
         let ptr = alloc_zeroed(layout);
 
@@ -144,12 +144,12 @@ impl Link {
         let size = this.as_ref().as_bump().capacity();
 
         let layout =
-            Self::layout_from_size(size).expect("Failed to construct layout for allocated Bump");
+            Self::layout_from_size(size).expect("Failed to construct layout for allocated MemBump");
 
         dealloc(this.as_ptr() as *mut u8, layout);
     }
 
-    /// Allocates a Bump and returns it.
+    /// Allocates a MemBump and returns it.
     pub(crate) fn alloc(size: usize) -> Result<NonNull<Self>, RawAllocError> {
         let layout =
             Self::layout_from_size(size).map_err(|_| RawAllocError::new(size, Failure::Layout))?;
