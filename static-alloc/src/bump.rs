@@ -229,7 +229,7 @@ pub struct LeakError<T> {
 /// }
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Level(usize);
+pub struct Level(pub(crate) usize);
 
 /// A successful allocation and current [`Level`].
 ///
@@ -682,6 +682,7 @@ impl<T> Bump<T> {
     ///
     /// [`ptr::slice_from_raw_parts`]: https://github.com/rust-lang/rust/issues/36925
     /// [`ManuallyDrop::drop`]: https://doc.rust-lang.org/beta/std/mem/struct.ManuallyDrop.html#method.drop
+    #[deprecated = "Use leak_box and initialize it with the value. This does not move the value in the failure case."]
     pub fn leak<V>(&self, val: V) -> Result<&mut V, LeakError<V>> {
         match self.get::<V>() {
             // SAFETY: Just allocated this for a `V`.
@@ -720,6 +721,7 @@ impl<T> Bump<T> {
     ///
     /// [`leak`]: #method.leak
     /// [`level`]: #method.level
+    #[deprecated = "Use leak_box_at and initialize it with the value. This does not move the value in the failure case."]
     pub fn leak_at<V>(&self, val: V, level: Level)
         -> Result<(&mut V, Level), LeakError<V>>
     {
@@ -736,17 +738,7 @@ impl<T> Bump<T> {
 
     /// 'Allocate' a ZST.
     fn zst_fake_alloc<Z>(&self) -> Allocation<'_, Z> {
-        assert!(mem::size_of::<Z>() == 0);
-        // If `Z` is a ZST, then the stride of any array is equal to 0. Thus, all arrays and slices
-        // havee the same layout which only depends on the alignment. If we need a storage for this
-        // ZST we just take one of those as our base 'allocation' which can also never be aliased.
-        let alloc: &[Z; 0] = &[];
-
-        Allocation {
-            ptr: NonNull::from(alloc).cast(),
-            lifetime: AllocTime::default(),
-            level: self.level(),
-        }
+        Allocation::for_zst(self.level())
     }
 
     /// Try to bump the monotonic, atomic consume counter.
@@ -793,6 +785,21 @@ impl<'alloc, T> Allocation<'alloc, T> {
     pub unsafe fn leak(self, val: T) -> &'alloc mut T {
         core::ptr::write(self.ptr.as_ptr(), val);
         &mut *self.ptr.as_ptr()
+    }
+
+    /// An 'allocation' for an arbitrary ZST, at some arbitrary level.
+    pub(crate) fn for_zst(level: Level) -> Self {
+        assert!(mem::size_of::<T>() == 0);
+        // If `Z` is a ZST, then the stride of any array is equal to 0. Thus, all arrays and slices
+        // havee the same layout which only depends on the alignment. If we need a storage for this
+        // ZST we just take one of those as our base 'allocation' which can also never be aliased.
+        let alloc: &[T; 0] = &[];
+
+        Allocation {
+            ptr: NonNull::from(alloc).cast(),
+            lifetime: AllocTime::default(),
+            level: level,
+        }
     }
 }
 

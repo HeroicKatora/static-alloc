@@ -8,6 +8,7 @@ use core::{
 
 use alloc_traits::AllocTime;
 
+use crate::bump::{Allocation, Failure, Level};
 use crate::leaked::LeakBox;
 
 /// A bump allocator whose storage capacity and alignment is given by `T`.
@@ -159,6 +160,70 @@ impl MemBump {
         Ok(unsafe {
             LeakBox::new_from_raw_non_null(ptr, elem, lifetime)
         })
+    }
+
+    /// Allocate a region of memory.
+    ///
+    /// This is a safe alternative to [GlobalAlloc::alloc](#impl-GlobalAlloc).
+    ///
+    /// # Panics
+    /// This function will panic if the requested layout has a size of `0`. For the use in a
+    /// `GlobalAlloc` this is explicitely forbidden to request and would allow any behaviour but we
+    /// instead strictly check it.
+    pub fn alloc(&self, layout: Layout) -> Option<NonNull<u8>> {
+        Some(self.try_alloc(layout)?.ptr)
+    }
+
+    /// Try to allocate some layout with a precise base location.
+    ///
+    /// The base location is the currently consumed byte count, without correction for the
+    /// alignment of the allocation. This will succeed if it can be allocate exactly at the
+    /// expected location.
+    ///
+    /// # Panics
+    /// This function may panic if the provided `level` is from a different slab.
+    pub fn alloc_at(&self, layout: Layout, level: Level)
+        -> Result<NonNull<u8>, Failure>
+    {
+        let Allocation { ptr, .. } = self.try_alloc_at(layout, level.0)?;
+        Ok(ptr)
+    }
+
+    pub fn get<V>(&self) -> Option<Allocation<V>> {
+        todo!()
+    }
+
+    pub fn get_at<V>(&self, level: Level) -> Result<Allocation<V>, Failure> {
+        todo!()
+    }
+
+    pub fn level(&self) -> Level {
+        todo!()
+    }
+
+    fn try_alloc(&self, layout: Layout)
+        -> Option<Allocation<'_>>
+    {
+        // Guess zero, this will fail when we try to access it and it isn't.
+        let mut consumed = 0;
+        loop {
+            match self.try_alloc_at(layout, consumed) {
+                Ok(alloc) => return Some(alloc),
+                Err(Failure::Exhausted) => return None,
+                Err(Failure::Mismatch{ observed }) => consumed = observed.0,
+            }
+        }
+    }
+
+    fn try_alloc_at(&self, layout: Layout, expect_consumed: usize)
+        -> Result<Allocation<'_>, Failure>
+    {
+        todo!()
+    }
+
+    /// 'Allocate' a ZST.
+    fn zst_fake_alloc<Z>(&self) -> Allocation<'_, Z> {
+        Allocation::for_zst(self.level())
     }
 }
 
