@@ -47,6 +47,9 @@ pub struct MemBump {
     /// a Cell<MaybeUninit> to allow modification
     /// trough a &self reference, and to allow
     /// writing uninit padding bytes.
+    /// Note that the underlying memory is in one
+    /// contiguous `UnsafeCell`, it's only represented
+    /// here to make it easier to slice.
     data: [UnsafeCell<MaybeUninit<u8>>],
 }
 
@@ -204,13 +207,12 @@ impl MemBump {
     fn try_alloc(&self, layout: Layout)
         -> Option<Allocation<'_>>
     {
-        // Guess zero, this will fail when we try to access it and it isn't.
-        let mut consumed = 0;
-        loop {
-            match self.try_alloc_at(layout, consumed) {
-                Ok(alloc) => return Some(alloc),
-                Err(Failure::Exhausted) => return None,
-                Err(Failure::Mismatch{ observed }) => consumed = observed.0,
+        let consumed = self.index.get();
+        match self.try_alloc_at(layout, consumed) {
+            Ok(alloc) => return Some(alloc),
+            Err(Failure::Exhausted) => return None,
+            Err(Failure::Mismatch{ observed: _ }) => {
+                unreachable!("Count in Cell concurrently modified, this UB")
             }
         }
     }
@@ -218,7 +220,71 @@ impl MemBump {
     fn try_alloc_at(&self, layout: Layout, expect_consumed: usize)
         -> Result<Allocation<'_>, Failure>
     {
-        todo!()
+        assert!(layout.size() > 0);
+        let length = layout.size();
+        // We want to access contiguous slice, so cast to a single cell.
+        let data: &UnsafeCell<[MaybeUninit<u8>]> =
+            unsafe { &*(&self.data as *const _ as *const UnsafeCell<_>) };
+        let base_ptr = data.get() as *mut u8;
+
+        let alignment = layout.align();
+        let requested = layout.size();
+
+        // Ensure no overflows when calculating offets within.
+        assert!(expect_consumed <= length);
+
+        let available = length.checked_sub(expect_consumed).unwrap();
+        let ptr_to = base_ptr.wrapping_add(expect_consumed);
+        let offset = ptr_to.align_offset(alignment);
+
+        if requested > available.saturating_sub(offset) {
+            return Err(Failure::Exhausted); // exhausted
+        }
+
+        // `size` can not be zero, saturation will thus always make this true.
+        assert!(offset < available);
+        let at_aligned = expect_consumed.checked_add(offset).unwrap();
+        let new_consumed = at_aligned.checked_add(requested).unwrap();
+        // new_consumed
+        //    = consumed + offset + requested  [lines above]
+        //   <= consumed + available  [bail out: exhausted]
+        //   <= length  [first line of loop]
+        // So it's ok to store `allocated` into `consumed`.
+        assert!(new_consumed <= length);
+        assert!(at_aligned < length);
+
+        // Try to actually allocate.
+        match self.bump(expect_consumed, new_consumed) {
+            Ok(()) => (),
+            Err(observed) => {
+                // Someone else was faster, if you want it then recalculate again.
+                return Err(Failure::Mismatch { observed: Level(observed) });
+            },
+        }
+
+        let aligned = unsafe {
+            // SAFETY:
+            // * `0 <= at_aligned < length` in bounds as checked above.
+            (base_ptr as *mut u8).add(at_aligned)
+        };
+
+        Ok(Allocation {
+            ptr: NonNull::new(aligned).unwrap(),
+            lifetime: AllocTime::default(),
+            level: Level(new_consumed),
+        })
+    }
+
+    fn bump(&self, expect: usize, consume: usize) -> Result<(), usize> {
+        debug_assert!(consume <= self.capacity());
+        debug_assert!(expect <= consume);
+        let prev = self.index.get();
+        if prev != expect {
+            Err(prev)
+        } else {
+            self.index.set(consume);
+            Ok(())
+        }
     }
 
     /// 'Allocate' a ZST.
