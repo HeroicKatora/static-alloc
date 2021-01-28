@@ -787,6 +787,15 @@ impl<'alloc, T> Allocation<'alloc, T> {
         &mut *self.ptr.as_ptr()
     }
 
+    /// Convert this into a mutable reference to an uninitialized slot.
+    ///
+    /// ## Safety
+    ///
+    /// Must have been allocated for a layout that fits the layout of T previously.
+    pub unsafe fn uninit(self) -> &'alloc mut MaybeUninit<T> {
+        &mut *self.ptr.cast().as_ptr()
+    }
+
     /// An 'allocation' for an arbitrary ZST, at some arbitrary level.
     pub(crate) fn for_zst(level: Level) -> Self {
         assert!(mem::size_of::<T>() == 0);

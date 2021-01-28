@@ -192,18 +192,92 @@ impl MemBump {
         Ok(ptr)
     }
 
+    /// Get an allocation for a specific type.
+    ///
+    /// It is not yet initialized but provides an interface for that initialization.
+    ///
+    /// ## Usage
+    ///
+    /// ```
+    /// # use static_alloc::unsync::Bump;
+    /// use core::cell::{Ref, RefCell};
+    ///
+    /// let slab: Bump<[Ref<'static, usize>; 1]> = Bump::uninit();
+    /// let data = RefCell::new(0xff);
+    ///
+    /// // We can place a `Ref` here but we did not yet.
+    /// let alloc = slab.get::<Ref<usize>>().unwrap();
+    /// let cell_ref = unsafe {
+    ///     alloc.leak(data.borrow())
+    /// };
+    ///
+    /// assert_eq!(**cell_ref, 0xff);
+    /// ```
     pub fn get<V>(&self) -> Option<Allocation<V>> {
-        todo!()
+        let alloc = self.try_alloc(Layout::new::<V>())?;
+        Some(Allocation {
+            lifetime: alloc.lifetime,
+            level: alloc.level,
+            ptr: alloc.ptr.cast(),
+        })
     }
 
+    /// Get an allocation for a specific type at a specific level.
+    ///
+    /// See [`get`] for usage.
+    ///
+    /// [`get`]: #method.get
     pub fn get_at<V>(&self, level: Level) -> Result<Allocation<V>, Failure> {
-        todo!()
+        let alloc = self.try_alloc_at(Layout::new::<V>(), level.0)?;
+        Ok(Allocation {
+            lifetime: alloc.lifetime,
+            level: alloc.level,
+            ptr: alloc.ptr.cast(),
+        })
     }
 
-    pub fn bump_box<T>(&self) -> Result<LeakBox<'_, MaybeUninit<T>>, Failure> {
-        todo!()
+    /// Allocate space for one `T` without initializing it.
+    ///
+    /// Note that the returned `MaybeUninit` can be wrapped as a `LeakBox` to store value and
+    /// safely drop it before the borrow ends.
+    ///
+    /// ## Usage
+    ///
+    /// ```
+    /// # use static_alloc::unsync::Bump;
+    /// use core::cell::RefCell;
+    /// use static_alloc::leaked::LeakBox;
+    ///
+    /// let slab: Bump<[usize; 4]> = Bump::uninit();
+    /// let data = RefCell::new(0xff);
+    ///
+    /// let slot = slab.bump_box().unwrap();
+    /// let boxed = LeakBox::from(slot);
+    /// let cell_box = LeakBox::write(boxed, data.borrow());
+    ///
+    /// assert_eq!(**cell_box, 0xff);
+    /// drop(cell_box);
+    ///
+    /// assert!(data.try_borrow_mut().is_ok());
+    /// ```
+    pub fn bump_box<T>(&self) -> Result<&'_ mut MaybeUninit<T>, Failure> {
+        let allocation = self.get_at(self.level())?;
+        Ok(unsafe { allocation.uninit() })
     }
 
+    /// Allocate space for a slice of `T`s without initializing any.
+    ///
+    /// Retrieve individual `MaybeUninit` elements and wrap them as a `LeakBox` to store values. Or
+    /// use the slice as backing memory for one of the containers from `without-alloc`. Or manually
+    /// initialize them.
+    ///
+    /// ## Usage
+    ///
+    /// Quicksort, implemented recursively, requires a maximum of `log n` stack frames in the worst
+    /// case when implemented optimally. Since each frame is quite large this is wasteful. We can
+    /// use a properly sized buffer instead and implement an iterative solution. (Left as an
+    /// exercise to the reader, or see the examples for `without-alloc` where we use such a dynamic
+    /// allocation with an inline vector as our stack).
     pub fn bump_array<T>(&self, n: usize) -> Result<&'_ mut [MaybeUninit<T>], Failure> {
         let layout = Layout::array::<T>(n).map_err(|_| Failure::Exhausted)?;
         let raw = self.alloc(layout).ok_or(Failure::Exhausted)?;
@@ -212,8 +286,9 @@ impl MemBump {
         })
     }
 
+    /// Get the number of already allocated bytes.
     pub fn level(&self) -> Level {
-        todo!()
+        Level(self.index.get())
     }
 
     fn try_alloc(&self, layout: Layout)
