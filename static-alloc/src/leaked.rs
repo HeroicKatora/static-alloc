@@ -2,12 +2,107 @@
 use alloc_traits::AllocTime;
 
 use core::{
+    alloc::Layout,
     fmt,
     hash,
+    marker::PhantomData,
     mem::{ManuallyDrop, MaybeUninit},
     ops::{Deref, DerefMut},
     ptr::{self, NonNull},
 };
+
+/// Zero-sized marker struct that allows running one or several methods.
+///
+/// This ensures that allocation does not exceed certain limits that would likely blow the stack
+/// and run into Rust's canary, this aborting the process.
+pub struct Alloca<T> {
+    marker: PhantomData<[T]>,
+    len: usize,
+}
+
+impl<T> Alloca<T> {
+    /// Try to create a representation, that allows functions with dynamically stack-allocated
+    /// slices.
+    pub fn new(len: usize) -> Option<Self> {
+        // Check that it's okay to create the padded layout. This is pure so it will again work
+        // when we try during `run`.
+        let _padded_layout = Layout::array::<T>(len + 1).ok()?;
+        Some(Alloca {
+            marker: PhantomData,
+            len,
+        })
+    }
+
+    fn padded_layout(&self) -> Layout {
+        Layout::array::<T>(self.len + 1).expect("Checked this in the constructor")
+    }
+
+    /// Allocate a slice of elements.
+    ///
+    /// Please note that instantiating this method relies on the optimizer, to an extent. In
+    /// particular we will create stack slots of differing sizes depending on the internal size.
+    /// This shouldn't have an effect other than moving the stack pointer for various amounts and
+    /// should never have more than one `T` in overhead. However, we can't enforce this. In theory
+    /// llvm might still reserve stack space for all variants including a probe and thus
+    /// prematurely assume we have hit the bottom of the available stack space. This is not very
+    /// likely to occur in practice.
+    pub fn run<R>(
+        &self,
+        run: impl FnOnce(&mut [MaybeUninit<T>]) -> R
+    ) -> R {
+        // Required size to surely have enough space for an aligned allocation.
+        let required_size = self.padded_layout().size();
+
+        if required_size <= 8 {
+            self.run_with::<[u64; 1], _, _>(run)
+        } else if required_size <= 16 {
+            self.run_with::<[u64; 2], _, _>(run)
+        } else if required_size <= 32 {
+            self.run_with::<[u64; 4], _, _>(run)
+        } else if required_size <= 64 {
+            self.run_with::<[u64; 8], _, _>(run)
+        } else if required_size <= 128 {
+            self.run_with::<[u64; 16], _, _>(run)
+        } else if required_size <= 256 {
+            self.run_with::<[u64; 32], _, _>(run)
+        } else if required_size <= 512 {
+            self.run_with::<[u64; 64], _, _>(run)
+        } else if required_size <= 1024 {
+            self.run_with::<[u64; 128], _, _>(run)
+        } else if required_size <= 2048 {
+            self.run_with::<[u64; 256], _, _>(run)
+        } else if required_size <= (1 << 12) {
+            self.run_with::<[u64; 512], _, _>(run)
+        } else if required_size <= (1 << 13) {
+            self.run_with::<[u64; 1 << 10], _, _>(run)
+        } else if required_size <= (1 << 14) {
+            self.run_with::<[u64; 1 << 11], _, _>(run)
+        } else if required_size <= (1 << 15) {
+            self.run_with::<[u64; 1 << 12], _, _>(run)
+        } else if required_size <= (1 << 16) {
+            self.run_with::<[u64; 1 << 13], _, _>(run)
+        } else if required_size <= (1 << 17) {
+            self.run_with::<[u64; 1 << 14], _, _>(run)
+        } else if required_size <= (1 << 18) {
+            self.run_with::<[u64; 1 << 15], _, _>(run)
+        } else if required_size <= (1 << 19) {
+            self.run_with::<[u64; 1 << 16], _, _>(run)
+        } else if required_size <= (1 << 20) {
+            self.run_with::<[u64; 1 << 17], _, _>(run)
+        } else {
+            panic!("Stack allocation is too big");
+        }
+    }
+
+    fn run_with<I, R, F:FnOnce(&mut [MaybeUninit<T>]) -> R>(
+        &self,
+        run: F
+    ) -> R {
+        use crate::unsync::Bump;
+        let mem = Bump::<I>::uninit();
+        run(mem.bump_array::<T>(self.len).unwrap())
+    }
+}
 
 /// Represents an allocation within a Bump.
 ///
