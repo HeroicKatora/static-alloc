@@ -74,7 +74,9 @@ impl<'ctx, T> LeakBox<'ctx, T> {
         core::ptr::write(pointer.as_ptr(), val);
         Self { pointer, lifetime, }
     }
+}
 
+impl<'ctx, T: ?Sized> LeakBox<'ctx, T> {
     /// Retrieve the raw pointer wrapped by this box.
     ///
     /// After this method the caller is responsible for managing the value in the place behind the
@@ -180,7 +182,9 @@ impl<'ctx, T> LeakBox<'ctx, T> {
         // * For the lifetime 'a which is at most 'ctx.
         unsafe { &mut *pointer }
     }
+}
 
+impl<'ctx, T> LeakBox<'ctx, T> {
     /// Remove the value, forgetting the box in the process.
     ///
     /// This is similar to dereferencing a box (`*leak_box`) but no deallocation is involved. This

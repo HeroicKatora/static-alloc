@@ -200,6 +200,18 @@ impl MemBump {
         todo!()
     }
 
+    pub fn bump_box<T>(&self) -> Result<LeakBox<'_, MaybeUninit<T>>, Failure> {
+        todo!()
+    }
+
+    pub fn bump_array<T>(&self, n: usize) -> Result<&'_ mut [MaybeUninit<T>], Failure> {
+        let layout = Layout::array::<T>(n).map_err(|_| Failure::Exhausted)?;
+        let raw = self.alloc(layout).ok_or(Failure::Exhausted)?;
+        Ok(unsafe {
+            &mut *(ptr::slice_from_raw_parts_mut(raw.cast().as_ptr(), n))
+        })
+    }
+
     pub fn level(&self) -> Level {
         todo!()
     }
