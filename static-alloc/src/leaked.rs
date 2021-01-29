@@ -100,7 +100,8 @@ impl<T> Alloca<T> {
     ) -> R {
         use crate::unsync::Bump;
         let mem = Bump::<I>::uninit();
-        run(mem.bump_array::<T>(self.len).unwrap())
+        let slot = mem.bump_array::<T>(self.len).unwrap();
+        run(LeakBox::leak(slot))
     }
 }
 
@@ -411,6 +412,18 @@ impl<T: ?Sized> Drop for LeakBox<'_, T> {
 /// an owned value itself since it has no representational invariants.
 impl<'ctx, T> From<&'ctx mut MaybeUninit<T>> for LeakBox<'ctx, MaybeUninit<T>> {
     fn from(uninit: &'ctx mut MaybeUninit<T>) -> Self {
+        // SAFETY:
+        // * An instance of MaybeUninit is always valid.
+        // * The mut references means it can not be aliased.
+        // * Dropping a MaybeUninit is a no-op and can not invalidate any validity or security
+        //   invariants of this MaybeUninit or the contained T.
+        unsafe { LeakBox::from_raw(uninit) }
+    }
+}
+
+/// Construct a LeakBox to an existing slice of MaybeUninit.
+impl<'ctx, T> From<&'ctx mut [MaybeUninit<T>]> for LeakBox<'ctx, [MaybeUninit<T>]> {
+    fn from(uninit: &'ctx mut [MaybeUninit<T>]) -> Self {
         // SAFETY:
         // * An instance of MaybeUninit is always valid.
         // * The mut references means it can not be aliased.

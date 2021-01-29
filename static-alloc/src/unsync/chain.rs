@@ -3,13 +3,17 @@
 use core::{
     alloc::{Layout, LayoutErr},
     cell::Cell,
-    mem::{ManuallyDrop, MaybeUninit},
+    mem::MaybeUninit,
     ptr::{self, NonNull},
 };
 
-use alloc::alloc::{alloc_zeroed, dealloc};
+use alloc::{
+    alloc::alloc_zeroed,
+    boxed::Box,
+};
 
-use crate::unsync::bump::{MemBump, BumpError};
+use crate::bump::Failure;
+use crate::unsync::bump::MemBump;
 use crate::leaked::LeakBox;
 
 /// An error representing an error while construction
@@ -42,7 +46,9 @@ struct Link {
 /// it's memory from another allocator. Chain allocators
 /// can be chained together using [`Chain::chain`].
 pub struct Chain {
-    root: Cell<NonNull<Link>>,
+    /// The root. Critically, we must not deallocate before all borrows on self have ended, in
+    /// other words until its destructor.
+    root: Cell<LinkPtr>,
 }
 
 impl Chain {
@@ -51,53 +57,64 @@ impl Chain {
     pub fn new(size: usize) -> Result<Self, TryNewError> {
         let link = Link::alloc(size).map_err(|e| TryNewError { inner: e })?;
         Ok(Chain {
-            root: Cell::new(link),
+            root: Cell::new(Some(link)),
         })
     }
 
     /// Attempts to allocate `elem` within the allocator.
-    pub fn try_alloc<'bump, T>(&'bump self, elem: T) -> Result<LeakBox<'bump, T>, BumpError<T>> {
-        self.root().as_bump().push(elem)
+    pub fn bump_box<'bump, T: 'bump>(&'bump self)
+        -> Result<LeakBox<'bump, MaybeUninit<T>>, Failure>
+    {
+        let root = self.root().ok_or(Failure::Exhausted)?;
+        root.as_bump().bump_box()
     }
 
     /// Chains `self` together with `new`.
+    ///
+    /// Following allocations will first be allocated from `new`.
+    ///
+    /// Note that this will drop all but the first link from `new`.
     pub fn chain(&self, new: Chain) {
-        let new: ManuallyDrop<_> = ManuallyDrop::new(new);
+        // We can't drop our own, but we can drop the tail of `new`.
+        let self_bump = self.root.take();
 
-        let self_bump = self.root.get();
-        new.root().set_next(Some(self_bump));
-
-        self.root.set(new.root.get())
+        match new.root() {
+            None => {
+                self.root.set(self_bump)
+            }
+            Some(root) => {
+                unsafe { root.set_next(self_bump) };
+                self.root.set(new.root.take())
+            }
+        }
     }
 
     /// Returns the capacity of this `Chain`.
     /// This is how many *bytes* in total can
     /// be allocated within this `Chain`.
     pub fn capacity(&self) -> usize {
-        self.root().as_bump().capacity()
+        match self.root() {
+            None => 0,
+            Some(root) => root.as_bump().capacity(),
+        }
     }
 
     /// Returns the remaining capacity of this `Chain`.
     /// This is how many more *bytes* can be allocated
     /// within this `Chain`.
     pub fn remaining_capacity(&self) -> usize {
-        let index = self.root().as_bump().current_index();
-        self.capacity() - index
-    }
-
-    fn root(&self) -> &Link {
-        unsafe {
-            let bump_ptr = self.root.as_ptr();
-            (*bump_ptr).as_ref()
+        match self.root() {
+            None => 0,
+            Some(root) => self.capacity() - root.as_bump().level().0,
         }
     }
-}
 
-/// The kind of failure while allocation a `MemBump`.
-#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
-enum Failure {
-    RawAlloc,
-    Layout,
+    fn root(&self) -> Option<&Link> {
+        unsafe {
+            let bump_ptr = self.root.get()?.as_ptr();
+            Some(&*bump_ptr)
+        }
+    }
 }
 
 /// A type representing a failure while allocating
@@ -105,16 +122,32 @@ enum Failure {
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
 pub(crate) struct RawAllocError {
     allocation_size: usize,
-    kind: Failure,
+    kind: RawAllocFailure,
+}
+
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
+enum RawAllocFailure {
+    Exhausted,
+    Layout,
 }
 
 impl Link {
-    pub(crate) fn set_next(&self, next: LinkPtr) {
-        self.next.set(next);
+    /// Override the next pointer.
+    ///
+    /// ## Safety
+    /// It must point to a valid link. Furthermore, the old link is dropped!
+    pub(crate) unsafe fn set_next(&self, next: LinkPtr) {
+        if let Some(next) = self.next.replace(next) {
+            let _ = Box::from_raw(next.as_ptr());
+        }
     }
 
-    pub(crate) fn take_next(&self) -> LinkPtr {
-        self.next.take()
+    /// Take over the control over the tail.
+    pub(crate) fn take_next(&self) -> Option<Box<Link>> {
+        let ptr = self.next.take()?;
+        Some(unsafe {
+            Box::from_raw(ptr.as_ptr())
+        })
     }
 
     pub(crate) fn as_bump(&self) -> &MemBump {
@@ -127,47 +160,31 @@ impl Link {
             .map(|layout| layout.0)
     }
 
-    /// Given `layout`, allocates a MemBump and returns a pointer.
-    /// The MemBump will be initialized with zeroes.
-    unsafe fn alloc_raw(layout: Layout) -> Result<*mut u8, RawAllocError> {
+    unsafe fn alloc_raw(layout: Layout) -> Result<NonNull<u8>, RawAllocError> {
         let ptr = alloc_zeroed(layout);
-
-        if ptr.is_null() {
-            return Err(RawAllocError::new(layout.size(), Failure::RawAlloc));
-        } else {
-            Ok(ptr)
-        }
-    }
-
-    /// Deallocates `this`
-    pub(crate) unsafe fn dealloc(this: NonNull<Self>) {
-        let size = this.as_ref().as_bump().capacity();
-
-        let layout =
-            Self::layout_from_size(size).expect("Failed to construct layout for allocated MemBump");
-
-        dealloc(this.as_ptr() as *mut u8, layout);
+        NonNull::new(ptr).ok_or_else(|| {
+            RawAllocError::new(layout.size(), RawAllocFailure::Exhausted)
+        })
     }
 
     /// Allocates a MemBump and returns it.
-    pub(crate) fn alloc(size: usize) -> Result<NonNull<Self>, RawAllocError> {
-        let layout =
-            Self::layout_from_size(size).map_err(|_| RawAllocError::new(size, Failure::Layout))?;
+    pub(crate) fn alloc(capacity: usize) -> Result<NonNull<Self>, RawAllocError> {
+        let layout = Self::layout_from_size(capacity)
+            .map_err(|_| {
+                RawAllocError::new(capacity, RawAllocFailure::Layout)
+            })?;
 
         unsafe {
-            let ptr = Self::alloc_raw(layout)?;
-
+            let raw = Link::alloc_raw(layout)?;
             let raw_mut: *mut [Cell<MaybeUninit<u8>>] =
-                ptr::slice_from_raw_parts_mut(ptr.cast(), size);
-            let node_ptr = raw_mut as *mut Link;
-
-            Ok(NonNull::new_unchecked(node_ptr))
+                ptr::slice_from_raw_parts_mut(raw.cast().as_ptr(), capacity);
+            Ok(NonNull::new_unchecked(raw_mut as *mut Link))
         }
     }
 }
 
 impl RawAllocError {
-    const fn new(allocation_size: usize, kind: Failure) -> Self {
+    const fn new(allocation_size: usize, kind: RawAllocFailure) -> Self {
         Self {
             allocation_size,
             kind,
@@ -179,16 +196,23 @@ impl RawAllocError {
     }
 }
 
+/// Chain drops iteratively, so that we do not stack overflow.
 impl Drop for Chain {
     fn drop(&mut self) {
-        let mut current = Some(self.root.get());
-
+        let mut current = self.root.take();
         while let Some(non_null) = current {
-            unsafe {
-                let next = non_null.as_ref().take_next();
-                Link::dealloc(non_null);
-                current = next
-            }
+            // Drop as a box.
+            let link = unsafe { Box::from_raw(non_null.as_ptr()) };
+            current = link.next.take();
+        }
+    }
+}
+
+impl Drop for Link {
+    fn drop(&mut self) {
+        let mut current = self.take_next();
+        while let Some(link) = current {
+            current = link.take_next();
         }
     }
 }

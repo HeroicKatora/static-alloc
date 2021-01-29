@@ -75,7 +75,21 @@ impl<T> Bump<T> {
     }
 }
 
+#[cfg(feature = "alloc")]
 impl MemBump {
+    /// Allocate some space to use for a bump allocator.
+    pub fn new(capacity: usize) -> alloc::boxed::Box<Self> {
+        let layout = Self::layout_from_size(capacity)
+            .expect("Bad layout");
+        let ptr = NonNull::new(unsafe {
+                alloc::alloc::alloc(layout)
+            }).unwrap_or_else(|| {
+                alloc::alloc::handle_alloc_error(layout)
+            });
+        let ptr = ptr::slice_from_raw_parts_mut(ptr.as_ptr(), capacity);
+        unsafe { alloc::boxed::Box::from_raw(ptr as *mut MemBump) }
+    }
+
     /// Returns the layout for the `header` of a `MemBump`.
     /// The definition of `header` in this case is all the
     /// fields that come **before** the `data` field.
@@ -87,7 +101,7 @@ impl MemBump {
 
     /// Returns the layout for an array with the size of `size`
     fn data_layout(size: usize) -> Result<Layout, LayoutErr> {
-        Layout::array::<Cell<MaybeUninit<u8>>>(size)
+        Layout::array::<UnsafeCell<MaybeUninit<u8>>>(size)
     }
 
     /// Returns a layout for a MemBump where the length of the data field is `size`.
@@ -106,65 +120,9 @@ impl MemBump {
     pub(crate) const fn capacity(&self) -> usize {
         self.data.len()
     }
-
-    pub(crate) fn current_index(&self) -> usize {
-        self.index.get()
-    }
-}
-
-fn next_power_of(n: usize, pow: usize) -> usize {
-    let remain = n % pow;
-
-    [n, n + (pow - remain)][(remain != 0) as usize]
 }
 
 impl MemBump {
-    /// Returns the start *address* of the data field
-    fn data_start_address(&self) -> usize {
-        self.data.as_ptr() as usize + self.index.get()
-    }
-
-    fn align_index_for<T>(&self) -> usize {
-        let start_addr = self.data_start_address();
-        let aligned_start = next_power_of(start_addr, mem::align_of::<T>());
-        let aligned_index = aligned_start - self.data.as_ptr() as usize;
-        aligned_index
-    }
-
-    pub(crate) fn push<'node, T>(
-        &'node self,
-        elem: T,
-    ) -> Result<LeakBox<'node, T>, BumpError<T>> {
-        let start = self.align_index_for::<T>();
-        let ptr = match self
-            .data
-            .get(start..)
-            .and_then(|slice| slice.get(..mem::size_of::<T>()))
-            .map(|place| {
-                let ptr = place.as_ptr() as *mut T;
-                assert!(ptr as usize % mem::align_of::<T>() == 0);
-                // TODO: use NonNull<[u8]>::as_non_null_ptr().cast()
-                // as soon as `slice_ptr_get` is stable
-                ptr
-            }) {
-            Some(ptr) => ptr,
-            None => return Err(BumpError::new(elem)),
-        };
-
-        debug_assert!(!ptr.is_null());
-        let ptr = NonNull::new(ptr).unwrap();
-        // `end` should never overflow becouse of the slicing
-        // above. If somehow it *does* overflow, saturate at
-        // the max value, which is caught in a next `push` call.
-        let end = start.saturating_add(mem::size_of::<T>());
-        self.index.set(end);
-
-        let lifetime: AllocTime<'node> = AllocTime::default();
-        Ok(unsafe {
-            LeakBox::new_from_raw_non_null(ptr, elem, lifetime)
-        })
-    }
-
     /// Allocate a region of memory.
     ///
     /// This is a safe alternative to [GlobalAlloc::alloc](#impl-GlobalAlloc).
@@ -238,8 +196,8 @@ impl MemBump {
 
     /// Allocate space for one `T` without initializing it.
     ///
-    /// Note that the returned `MaybeUninit` can be wrapped as a `LeakBox` to store value and
-    /// safely drop it before the borrow ends.
+    /// Note that the returned `MaybeUninit` can be unwrapped from `LeakBox`. Or you can store an
+    /// arbitrary value and ensure it is safely dropped before the borrow ends.
     ///
     /// ## Usage
     ///
@@ -252,17 +210,18 @@ impl MemBump {
     /// let data = RefCell::new(0xff);
     ///
     /// let slot = slab.bump_box().unwrap();
-    /// let boxed = LeakBox::from(slot);
-    /// let cell_box = LeakBox::write(boxed, data.borrow());
+    /// let cell_box = LeakBox::write(slot, data.borrow());
     ///
     /// assert_eq!(**cell_box, 0xff);
     /// drop(cell_box);
     ///
     /// assert!(data.try_borrow_mut().is_ok());
     /// ```
-    pub fn bump_box<T>(&self) -> Result<&'_ mut MaybeUninit<T>, Failure> {
+    pub fn bump_box<'bump, T: 'bump>(&'bump self)
+        -> Result<LeakBox<'bump, MaybeUninit<T>>, Failure>
+    {
         let allocation = self.get_at(self.level())?;
-        Ok(unsafe { allocation.uninit() })
+        Ok(unsafe { allocation.uninit() }.into())
     }
 
     /// Allocate space for a slice of `T`s without initializing any.
@@ -278,12 +237,14 @@ impl MemBump {
     /// use a properly sized buffer instead and implement an iterative solution. (Left as an
     /// exercise to the reader, or see the examples for `without-alloc` where we use such a dynamic
     /// allocation with an inline vector as our stack).
-    pub fn bump_array<T>(&self, n: usize) -> Result<&'_ mut [MaybeUninit<T>], Failure> {
+    pub fn bump_array<'bump, T: 'bump>(&'bump self, n: usize)
+        -> Result<LeakBox<'bump, [MaybeUninit<T>]>, Failure>
+    {
         let layout = Layout::array::<T>(n).map_err(|_| Failure::Exhausted)?;
         let raw = self.alloc(layout).ok_or(Failure::Exhausted)?;
-        Ok(unsafe {
-            &mut *(ptr::slice_from_raw_parts_mut(raw.cast().as_ptr(), n))
-        })
+        let slice = ptr::slice_from_raw_parts_mut(raw.cast().as_ptr(), n);
+        let uninit = unsafe { &mut *slice };
+        Ok(uninit.into())
     }
 
     /// Get the number of already allocated bytes.
@@ -308,7 +269,7 @@ impl MemBump {
         -> Result<Allocation<'_>, Failure>
     {
         assert!(layout.size() > 0);
-        let length = layout.size();
+        let length = self.data.len();
         // We want to access contiguous slice, so cast to a single cell.
         let data: &UnsafeCell<[MaybeUninit<u8>]> =
             unsafe { &*(&self.data as *const _ as *const UnsafeCell<_>) };
@@ -324,7 +285,7 @@ impl MemBump {
         let ptr_to = base_ptr.wrapping_add(expect_consumed);
         let offset = ptr_to.align_offset(alignment);
 
-        if requested > available.saturating_sub(offset) {
+        if Some(requested) > available.checked_sub(offset) {
             return Err(Failure::Exhausted); // exhausted
         }
 
@@ -377,21 +338,6 @@ impl MemBump {
     /// 'Allocate' a ZST.
     fn zst_fake_alloc<Z>(&self) -> Allocation<'_, Z> {
         Allocation::for_zst(self.level())
-    }
-}
-
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, PartialOrd)]
-pub struct BumpError<T> {
-    val: T,
-}
-
-impl<T> BumpError<T> {
-    const fn new(val: T) -> Self {
-        Self { val }
-    }
-
-    pub fn into_inner(self) -> T {
-        self.val
     }
 }
 

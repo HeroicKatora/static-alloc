@@ -31,7 +31,6 @@
 // Copyright 2019 Andreas Molzer
 #![no_std]
 #![deny(missing_docs)]
-#![cfg_attr(feature = "alloc", feature(alloc_layout_extra))]
 
 #[cfg(feature = "alloc")]
 extern crate alloc;
