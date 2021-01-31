@@ -1,6 +1,6 @@
 [package]
 name = "static-alloc"
-version = "0.2.1"
+version = "0.2.2"
 description = "A bump allocator on static memory for the alloc-traits crate"
 authors = ["Andreas Molzer <andreas.molzer@gmx.de>"]
 edition = "2018"
@@ -14,10 +14,13 @@ categories = ["embedded", "memory-management", "no-std"]
 alloc-traits = { path = "../alloc-traits", version = "0.1.0" }
 
 [features]
+alloc = []
 # For apis depending on "try_reserve" (#48043).
 # Currently only used in a test for ensure future opportunities.
 nightly_try_reserve = []
-alloc = []
+# Enables the `unsync::Chain` module. Note that this is explicitly outside the
+# SemVer stability guarantees!
+nightly_chain = ["alloc"]
 
 # Tests that test `Bump` as GlobalAlloc. Must be in a separate test each.
 [[test]]
