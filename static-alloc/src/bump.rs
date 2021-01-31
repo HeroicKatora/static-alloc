@@ -682,7 +682,10 @@ impl<T> Bump<T> {
     ///
     /// [`ptr::slice_from_raw_parts`]: https://github.com/rust-lang/rust/issues/36925
     /// [`ManuallyDrop::drop`]: https://doc.rust-lang.org/beta/std/mem/struct.ManuallyDrop.html#method.drop
-    #[deprecated = "Use leak_box and initialize it with the value. This does not move the value in the failure case."]
+    ///
+    /// TODO: will be deprecated sooner or later in favor of a method that does not move the
+    /// resource on failure.
+    // #[deprecated = "Use leak_box and initialize it with the value. This does not move the value in the failure case."]
     pub fn leak<V>(&self, val: V) -> Result<&mut V, LeakError<V>> {
         match self.get::<V>() {
             // SAFETY: Just allocated this for a `V`.
@@ -721,7 +724,11 @@ impl<T> Bump<T> {
     ///
     /// [`leak`]: #method.leak
     /// [`level`]: #method.level
-    #[deprecated = "Use leak_box_at and initialize it with the value. This does not move the value in the failure case."]
+    ///
+    /// TODO: will be deprecated sooner or later in favor of a method that does not move the
+    /// resource on failure.
+    ///
+    // #[deprecated = "Use leak_box_at and initialize it with the value. This does not move the value in the failure case."]
     pub fn leak_at<V>(&self, val: V, level: Level)
         -> Result<(&mut V, Level), LeakError<V>>
     {

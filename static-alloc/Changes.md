@@ -1,3 +1,14 @@
+# v0.2.2
+
+- Added a synchronous Bump allocator. Its interface is similar to the
+  asynchronous version but at the same time tries to clean up minor issues,
+  such as moving value on failed allocation.
+- Added `LeakBox`, encapsulating a single value allocated within an
+  automatically cleaned up buffer (e.g. on the stack). Compared to `Allocation`
+  it has safe methods for initialization and deinitialization.
+- Added `Chain`, an unstable struct for chaining several bump allocators such
+  that you can allocate from one until it is empty then switching to the next.
+
 # v0.2.1
 
 - Fixed the documentation to refer to `without-alloc`

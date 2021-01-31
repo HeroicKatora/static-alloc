@@ -1,7 +1,7 @@
 mod bump;
-#[cfg(feature = "alloc")]
+#[cfg(all(feature = "alloc", feature="nightly_chain"))]
 mod chain;
 
 pub use bump::{Bump, MemBump};
-#[cfg(feature = "alloc")]
+#[cfg(all(feature="alloc", feature="nightly_chain"))]
 pub use chain::{Chain};
