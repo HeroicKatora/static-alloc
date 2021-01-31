@@ -20,7 +20,47 @@ use crate::leaked::LeakBox;
 ///
 /// # Usage
 ///
+/// For on-stack usage this works the same as [`Bump`]. Note that it is not possible to use as a
+/// global allocator though.
+///
+/// [`Bump`]: ../bump/struct.Bump.html
+///
+/// One interesting use case for this struct is as scratch space for subroutines. This ensures good
+/// locality and cache usage. It can also allows such subroutines to use a dynamic amount of space
+/// without the need to actually allocate. Contrary to other methods where the caller provides some
+/// preallocated memory it will also not 'leak' private data types. This could be used in handling
+/// web requests.
+///
 /// ```
+/// use static_alloc::unsync::Bump;
+/// # use static_alloc::unsync::MemBump;
+/// # fn subroutine_one(_: &MemBump) {}
+/// # fn subroutine_two(_: &MemBump) {}
+///
+/// let mut stack_buffer: Bump<[usize; 64]> = Bump::uninit();
+/// subroutine_one(&stack_buffer);
+/// stack_buffer.reset();
+/// subroutine_two(&stack_buffer);
+/// ```
+///
+/// Note that you need not use the stack for the `Bump` itself. Indeed, you could allocate a large
+/// contiguous instance from the global (synchronized) allocator and then do subsequent allocations
+/// from the `Bump` you've obtained. This avoids potential contention on a lock of the global
+/// allocator, especially in case you must do many small allocations. If you're writing an
+/// allocator yourself you might use this technique as an internal optimization.
+///
+#[cfg_attr(feature = "alloc", doc = "```")]
+#[cfg_attr(not(feature = "alloc"), doc = "```ignore")]
+/// use static_alloc::unsync::{Bump, MemBump};
+/// # struct Request;
+/// # fn handle_request(_: &MemBump, _: Request) {}
+/// # fn iterate_recv() -> Option<Request> { None }
+/// let mut local_page: Box<Bump<[u64; 64]>> = Box::new(Bump::uninit());
+///
+/// for request in iterate_recv() {
+///     local_page.reset();
+///     handle_request(&local_page, request);
+/// }
 /// ```
 #[repr(C)]
 pub struct Bump<T> {
@@ -252,6 +292,14 @@ impl MemBump {
         Level(self.index.get())
     }
 
+    /// Reset the bump allocator.
+    ///
+    /// This requires a unique reference to the allocator hence no allocation can be alive at this
+    /// point. It will reset the internal count of used bytes to zero.
+    pub fn reset(&mut self) {
+        self.index.set(0)
+    }
+
     fn try_alloc(&self, layout: Layout)
         -> Option<Allocation<'_>>
     {
@@ -353,6 +401,22 @@ impl<T> ops::Deref for Bump<T> {
             ptr::slice_from_raw_parts(ptr, data_layout.size());
         // Now we have a pointer to MemBump with length meta data of the data slice.
         let bump = unsafe { &*(mem as *const MemBump) };
+        debug_assert_eq!(from_layout, Layout::for_value(bump));
+        bump
+    }
+}
+
+impl<T> ops::DerefMut for Bump<T> {
+    fn deref_mut(&mut self) -> &mut MemBump {
+        let from_layout = Layout::for_value(self);
+        let data_layout = Layout::new::<MaybeUninit<T>>();
+        // Construct a point with the meta data of a slice to `data`, but pointing to the whole
+        // struct instead. This meta data is later copied to the meta data of `bump` when cast.
+        let ptr = self as *mut Self as *mut MaybeUninit<u8>;
+        let mem: *mut [MaybeUninit<u8>] =
+            ptr::slice_from_raw_parts_mut(ptr, data_layout.size());
+        // Now we have a pointer to MemBump with length meta data of the data slice.
+        let bump = unsafe { &mut *(mem as *mut MemBump) };
         debug_assert_eq!(from_layout, Layout::for_value(bump));
         bump
     }
