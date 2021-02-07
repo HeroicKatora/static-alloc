@@ -6,7 +6,7 @@ authors = ["Andreas Molzer <andreas.molzer@gmx.de>"]
 edition = "2018"
 license = "MIT"
 documentation = "https://docs.rs/without-alloc"
-repository = "https://github.com/HeroicKatora/alloc-free"
+repository = "https://github.com/HeroicKatora/static-alloc"
 readme = "Readme.md"
 categories = ["embedded", "memory-management", "no-std"]
 
