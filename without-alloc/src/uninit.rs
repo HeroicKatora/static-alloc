@@ -23,6 +23,7 @@ use core::alloc::Layout;
 use core::marker::PhantomData;
 
 use crate::boxed::Box;
+use alloc_traits::CoerceUnsize;
 
 /// Points to an uninitialized place but would otherwise be a valid reference.
 ///
@@ -971,6 +972,38 @@ impl<T: ?Sized> Clone for UninitView<'_, T> {
 }
 
 impl<T: ?Sized> Copy for UninitView<'_, T> { }
+
+unsafe impl<'a, T, U: ?Sized> CoerceUnsize<U> for UninitView<'a, T> {
+    type Pointee = T;
+    type Output = UninitView<'a, U>;
+    fn as_sized_ptr(&self) -> *mut T {
+        self.as_ptr() as *mut T
+    }
+    unsafe fn replace_ptr(self, new: *mut U) -> UninitView<'a, U> {
+        let length = self.byte_capacity();
+        debug_assert_eq!(self.as_ptr() as *const u8, new as *const u8);
+        // SAFETY: caller guarantees this is equal to our pointer, which is non-null
+        let new = ptr::NonNull::new_unchecked(new);
+        UninitView::new(new, length)
+    }
+}
+
+unsafe impl<'a, T, U: ?Sized> CoerceUnsize<U> for Uninit<'a, T> {
+    type Pointee = T;
+    type Output = Uninit<'a, U>;
+
+    fn as_sized_ptr(&self) -> *mut T {
+        self.as_ptr()
+    }
+
+    unsafe fn replace_ptr(self, new: *mut U) -> Uninit<'a, U> {
+        let length = self.byte_capacity();
+        debug_assert_eq!(self.as_ptr() as *const u8, new as *const u8);
+        // SAFETY: caller guarantees this is equal to our pointer, which is non-null
+        let new = ptr::NonNull::new_unchecked(new);
+        Uninit::new(new, length)
+    }
+}
 
 #[cfg(test)]
 mod tests {
