@@ -59,7 +59,7 @@ use crate::uninit::Uninit;
 /// Instead, this `Box` can offer additional ways to manipulate and massage the underlying
 /// allocation. It should be possible to restore the exact allocation `Box` semantics (albeit with
 /// one `usize` more space usage) via a wrapper when an allocator is available.
-pub struct Box<'a, T> {
+pub struct Box<'a, T: ?Sized> {
     inner: Uninit<'a, T>,
 }
 
@@ -73,6 +73,16 @@ impl<'a, T> Box<'a, T> {
         }
     }
 
+    /// Take out the value and return the allocation.
+    ///
+    /// This function is the opposite of `new`.
+    pub fn take(b: Self) -> (T, Uninit<'a, T>) {
+        let val = unsafe { b.inner.read() };
+        (val, Self::into_raw(b))
+    }
+}
+
+impl<'a, T: ?Sized> Box<'a, T> {
     /// Create a box from an pointer to an already initialized value.
     ///
     /// Ensures that an already initialized value is properly dropped at the end of the lifetime of
@@ -97,7 +107,7 @@ impl<'a, T> Box<'a, T> {
         mem::forget(b);
         unsafe {
             // SAFETY: restored the `Uninit` we just forgot.
-            Uninit::from_memory(ptr.cast(), len).cast().unwrap()
+            Uninit::new(ptr, len)
         }
     }
 
@@ -110,17 +120,9 @@ impl<'a, T> Box<'a, T> {
         // SAFETY: still initialized
         unsafe { raw.into_mut() }
     }
-
-    /// Take out the value and return the allocation.
-    ///
-    /// This function is the opposite of `new`.
-    pub fn take(b: Self) -> (T, Uninit<'a, T>) {
-        let val = unsafe { b.inner.read() };
-        (val, Self::into_raw(b))
-    }
 }
 
-impl<T> Drop for Box<'_, T> {
+impl<T: ?Sized> Drop for Box<'_, T> {
     fn drop(&mut self) {
         unsafe {
             ptr::drop_in_place(self.inner.as_ptr())
@@ -128,7 +130,7 @@ impl<T> Drop for Box<'_, T> {
     }
 }
 
-impl<T> ops::Deref for Box<'_, T> {
+impl<T: ?Sized> ops::Deref for Box<'_, T> {
     type Target = T;
 
     fn deref(&self) -> &T {
@@ -138,7 +140,7 @@ impl<T> ops::Deref for Box<'_, T> {
     }
 }
 
-impl<T> ops::DerefMut for Box<'_, T> {
+impl<T: ?Sized> ops::DerefMut for Box<'_, T> {
     fn deref_mut(&mut self) -> &mut T {
         unsafe {
             self.inner.as_mut()
