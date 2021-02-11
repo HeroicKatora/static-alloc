@@ -1,7 +1,21 @@
 //! Safe abstractions around pointing at uninitialized memory without references.
 //!
+//! This solves two issues beyond the standard library: Firstly, `MaybeUninit` does not permitted
+//! unsized types. Secondly, a strict interpretation of pointer provenance implies that once a
+//! reference is created our access is restricted the memory referred to in it. This spoils our
+//! access to any memory in a potential tail of the allocation, which is wasteful.
+//!
 //! It is potentially **UB** to have references to uninitialized memory even if such a reference is
 //! not 'used' in any particular manner. See [the discussion of the unsafe working group][wg-ref].
+//!
+//! TODO: In some next version we'd like to switch to `&'a UnsafeCell<MaybeUninit<T>>` here, or
+//! even replace the UnsafeCell once we've replace the `view` attribute in Uninit. But alas we're
+//! not permitted to have an unsized parameter to `MaybeUninit`.
+//!
+//! More work using unsized type parameter would in particular make it redundant to store the
+//! length as we could refer to memory with a wrapper `Byte(u8)` and the `T = [Byte]` instantiation
+//! for the type parameter of `Uninit`/`UninitView`. Storing additional bytes would be a wrapper
+//! around the main interface.
 //!
 //! [wg-ref]: https://github.com/rust-lang/unsafe-code-guidelines/issues/77
 use core::{fmt, mem, slice, ptr};
@@ -85,7 +99,7 @@ pub struct UninitView<'a, T: ?Sized> {
     ///
     /// Note that `len` is always at least as large as the (minimum) size of `T`. Furthermore, the
     /// pointer is always correctly aligned to a `T`.
-    ptr: ptr::NonNull<u8>,
+    ptr: ptr::NonNull<T>,
 
     /// The actual length *in bytes*.
     ///
@@ -117,7 +131,7 @@ impl Uninit<'_, ()> {
     /// When in doubt, refactor code such that utilization of `from_maybe_uninit` is possible.
     pub unsafe fn from_memory(ptr: ptr::NonNull<u8>, len: usize) -> Self {
         Uninit::from_presumed_mutable_view(UninitView {
-            ptr,
+            ptr: ptr.cast(),
             len,
             lifetime: PhantomData,
             typed: PhantomData,
@@ -242,30 +256,18 @@ impl<'a, T> Uninit<'a, T> {
     pub fn split_to_fit(&mut self) -> Uninit<'a, ()> {
         self.split_at_byte(mem::size_of::<T>()).unwrap()
     }
+}
 
-    /// Initialize the place and return a reference to the value.
-    pub fn init(self, val: T) -> &'a mut T {
-        let ptr = self.as_ptr();
-        unsafe {
-            // SAFETY:
-            // * can only create instances where layout of `T` 'fits'
-            // * valid for lifetime `'a` (as per `UninitView`).
-            // * unaliased for lifetime `'a` (as per own invariant from unsafe constructor). No
-            //   other method duplicates the pointer or allows a second `Uninit` without borrowing
-            //   the first.
-            ptr::write(ptr, val);
-            &mut *ptr
-        }
-    }
 
+impl<'a, T: ?Sized> Uninit<'a, T> {
     /// Acquires the underlying *mut pointer.
     pub const fn as_ptr(&self) -> *mut T {
-        self.view.ptr.cast().as_ptr()
+        self.view.ptr.as_ptr()
     }
 
     /// Acquires the underlying pointer as a `NonNull`.
     pub const fn as_non_null(&self) -> ptr::NonNull<T> {
-        self.view.ptr.cast()
+        self.view.ptr
     }
 
     /// Dereferences the content.
@@ -305,6 +307,23 @@ impl<'a, T> Uninit<'a, T> {
     pub unsafe fn into_mut(self) -> &'a mut T {
         &mut *self.as_ptr()
     }
+}
+
+impl<'a, T> Uninit<'a, T> {
+    /// Initialize the place and return a reference to the value.
+    pub fn init(self, val: T) -> &'a mut T {
+        let ptr = self.as_ptr();
+        unsafe {
+            // SAFETY:
+            // * can only create instances where layout of `T` 'fits'
+            // * valid for lifetime `'a` (as per `UninitView`).
+            // * unaliased for lifetime `'a` (as per own invariant from unsafe constructor). No
+            //   other method duplicates the pointer or allows a second `Uninit` without borrowing
+            //   the first.
+            ptr::write(ptr, val);
+            &mut *ptr
+        }
+    }
 
     /// Turn this into a reference to standard `MaybeUninit`.
     ///
@@ -320,14 +339,6 @@ impl<'a, T> Uninit<'a, T> {
         unsafe { &mut*(self.as_ptr() as *mut mem::MaybeUninit<T>) }
     }
 
-    /// Utilize this `Uninit` allocation for a boxed value.
-    ///
-    /// Stores the value at the pointed-to location and utilizes the `Box` as a RAII-guard to
-    /// properly drop the value when the box itself is dropped.
-    pub fn into_box(self, val: T) -> Box<'a, T> {
-        Box::new(val, self)
-    }
-
     /// Read a value from the uninit place without moving it.
     ///
     /// The `Uninit` ensures that the inner pointer is correctly aligned, non-null, and points to a
@@ -339,13 +350,25 @@ impl<'a, T> Uninit<'a, T> {
     pub unsafe fn read(&self) -> T {
         ptr::read(self.as_ptr())
     }
+
+    /// Utilize this `Uninit` allocation for a boxed value.
+    ///
+    /// Stores the value at the pointed-to location and utilizes the `Box` as a RAII-guard to
+    /// properly drop the value when the box itself is dropped.
+    pub fn into_box(self, val: T) -> Box<'a, T> {
+        Box::new(val, self)
+    }
 }
 
 impl<'a, T> Uninit<'a, [T]> {
     /// Creates a pointer to an empty slice.
     pub fn empty() -> Self {
         Uninit::from_presumed_mutable_view(UninitView {
-            ptr: ptr::NonNull::<T>::dangling().cast(),
+            ptr: {
+                let base = ptr::NonNull::<T>::dangling().as_ptr();
+                let slice = ptr::slice_from_raw_parts_mut(base, 0);
+                ptr::NonNull::new(slice).unwrap()
+            },
             len: 0,
             lifetime: PhantomData,
             typed: PhantomData,
@@ -435,47 +458,37 @@ impl<'a, T> Uninit<'a, [T]> {
                 self.capacity())
         }
     }
-
-    /// Dereferences the content.
-    ///
-    /// The resulting lifetime is bound to self so this behaves "as if" it were actually an
-    /// instance of T that is getting borrowed. If a longer lifetime is needed, use `into_ref`.
-    ///
-    /// # Safety
-    /// The pointee must have been initialized through other means.
-    pub unsafe fn as_ref(&self) -> &[T] {
-        slice::from_raw_parts(self.as_begin_ptr(), self.capacity())
-    }
-
-    /// Mutably dereferences the content.
-    ///
-    /// The resulting lifetime is bound to self so this behaves "as if" it were actually an
-    /// instance of T that is getting borrowed. If a longer lifetime is needed, use `into_mut`.
-    ///
-    /// # Safety
-    /// The pointee must have been initialized through other means.
-    pub unsafe fn as_mut(&mut self) -> &mut [T] {
-        slice::from_raw_parts_mut(self.as_begin_ptr(), self.capacity())
-    }
-
-    /// Turn this into a reference to the content.
-    ///
-    /// # Safety
-    /// The pointee must have been initialized through other means.
-    pub unsafe fn into_ref(self) -> &'a [T] {
-        slice::from_raw_parts(self.as_begin_ptr(), self.capacity())
-    }
-
-    /// Turn this into a mutable reference to the content.
-    ///
-    /// # Safety
-    /// The pointee must have been initialized through other means.
-    pub unsafe fn into_mut(self) -> &'a mut [T] {
-        slice::from_raw_parts_mut(self.as_begin_ptr(), self.capacity())
-    }
 }
 
 impl<'a, T: ?Sized> Uninit<'a, T> {
+    /// Create a view to typed uninitialized memory.
+    ///
+    /// It is given a capacity of memory to which it refers in *bytes*.
+    ///
+    /// ## Safety
+    ///
+    /// The `ptr` must describe a valid, *sized* region. Refer to `Layout::for_value_raw` for
+    /// details. This criteria is trivially fulfilled for any sized `T`.
+    ///
+    /// A valid allocation must exist at the pointer with length at least `len`.
+    ///
+    /// In particular, it is **UB** to create this from a reference to a variable of a type for
+    /// which a completely uninitialized content is not valid. The standard type for avoiding the
+    /// UB is `core::mem::MaybeUninit`.
+    ///
+    /// When in doubt, refactor code such that utilization of `from_maybe_uninit` is possible.
+    pub unsafe fn new(ptr: ptr::NonNull<T>, len: usize) -> Self {
+        Uninit {
+            view: UninitView::new(ptr, len),
+            mutable: PhantomData,
+        }
+    }
+
+    /// Return the number of bytes this may view.
+    pub fn byte_capacity(&self) -> usize {
+        self.view.byte_capacity()
+    }
+
     /// Check if the view fits some layout.
     ///
     /// The `cast` to a type of the provided layout will work without error.
@@ -532,7 +545,7 @@ impl UninitView<'_, ()> {
     /// When in doubt, refactor code such that utilization of `from_maybe_uninit` is possible.
     pub unsafe fn from_memory(ptr: ptr::NonNull<u8>, len: usize) -> Self {
         UninitView {
-            ptr,
+            ptr: ptr.cast(),
             len,
             lifetime: PhantomData,
             typed: PhantomData,
@@ -640,6 +653,82 @@ impl<'a, T> UninitView<'a, T> {
         raw.cast().unwrap()
     }
 
+    /// Try to cast to an `UninitView` for a slice type.
+    pub fn cast_slice<U>(self) -> Result<UninitView<'a, [U]>, Self> {
+        let empty = Layout::for_value::<[U]>(&[]);
+
+        if !self.fits(empty) {
+            return Err(self)
+        }
+
+        Ok(UninitView {
+            ptr: {
+                let base = self.ptr.as_ptr() as *mut T;
+                let element = Layout::new::<U>();
+                let slice_len = if element.size() == 0 {
+                    usize::MAX
+                } else {
+                    self.len / element.size()
+                };
+                let slice = ptr::slice_from_raw_parts_mut(base as *mut U, slice_len);
+                ptr::NonNull::new(slice).unwrap()
+            },
+            len: self.len,
+            lifetime: PhantomData,
+            typed: PhantomData,
+        })
+    }
+
+    /// Split off the tail that is not required for holding an instance of `T`.
+    pub fn split_to_fit(&mut self) -> UninitView<'a, ()> {
+        self.split_at_byte(mem::size_of::<T>()).unwrap()
+    }
+
+    /// Turn this into a reference to standard `MaybeUninit`.
+    ///
+    /// This is mainly useful for interfacing with other consumers which expect standard library
+    /// types and to mirror `Uninit`.
+    ///
+    /// Note that the sequence `from_maybe_uninit`, `into_maybe_uninit` is a no-op. The converse is
+    /// however not the case, as it will potentially discard unused padding present in the original
+    /// `Uninit`.
+    pub fn into_maybe_uninit(self) -> &'a mem::MaybeUninit<T> {
+        // SAFETY: MaybeUninit is a transparent wrapper and need not be initialized.
+        unsafe { &*(self.as_ptr() as *const mem::MaybeUninit<T>) }
+    }
+}
+
+impl<'a, T: ?Sized> UninitView<'a, T> {
+    /// Create a reference to typed uninitialized memory.
+    ///
+    /// It is given a capacity of memory to which it refers in *bytes*.
+    ///
+    /// ## Safety
+    ///
+    /// The `ptr` must describe a valid, *sized* region. Refer to `Layout::for_value_raw` for
+    /// details. This criteria is trivially fulfilled for any sized `T`.
+    ///
+    /// A valid allocation must exist at the pointer with length at least `len`.
+    ///
+    /// In particular, it is **UB** to create this from a reference to a variable of a type for
+    /// which a completely uninitialized content is not valid. The standard type for avoiding the
+    /// UB is `core::mem::MaybeUninit`.
+    ///
+    /// When in doubt, refactor code such that utilization of `from_maybe_uninit` is possible.
+    pub unsafe fn new(ptr: ptr::NonNull<T>, len: usize) -> Self {
+        UninitView {
+            ptr,
+            len,
+            lifetime: PhantomData,
+            typed: PhantomData,
+        }
+    }
+
+    /// Return the number of bytes this may refer to.
+    pub fn byte_capacity(&self) -> usize {
+        self.len
+    }
+
     /// Try to cast to an `UninitView` for another type.
     pub fn cast<U>(self) -> Result<UninitView<'a, U>, Self> {
         if !self.fits(Layout::new::<U>()) {
@@ -654,27 +743,6 @@ impl<'a, T> UninitView<'a, T> {
         })
     }
 
-    /// Try to cast to an `UninitView` for a slice type.
-    pub fn cast_slice<U>(self) -> Result<UninitView<'a, [U]>, Self> {
-        let empty = Layout::for_value::<[U]>(&[]);
-
-        if !self.fits(empty) {
-            return Err(self)
-        }
-
-        Ok(UninitView {
-            ptr: self.ptr,
-            len: self.len,
-            lifetime: PhantomData,
-            typed: PhantomData,
-        })
-    }
-
-    /// Split off the tail that is not required for holding an instance of `T`.
-    pub fn split_to_fit(&mut self) -> UninitView<'a, ()> {
-        self.split_at_byte(mem::size_of::<T>()).unwrap()
-    }
-
     /// Acquires the underlying `*const T` pointer.
     pub const fn as_ptr(&self) -> *const T {
         self.ptr.as_ptr() as *const T
@@ -682,7 +750,7 @@ impl<'a, T> UninitView<'a, T> {
 
     /// Acquires the underlying pointer as a `NonNull`.
     pub fn as_non_null(&self) -> ptr::NonNull<T> {
-        self.ptr.cast()
+        self.ptr
     }
 
     /// Dereferences the content.
@@ -703,19 +771,6 @@ impl<'a, T> UninitView<'a, T> {
     pub unsafe fn into_ref(self) -> &'a T {
         &*self.as_ptr()
     }
-
-    /// Turn this into a reference to standard `MaybeUninit`.
-    ///
-    /// This is mainly useful for interfacing with other consumers which expect standard library
-    /// types and to mirror `Uninit`.
-    ///
-    /// Note that the sequence `from_maybe_uninit`, `into_maybe_uninit` is a no-op. The converse is
-    /// however not the case, as it will potentially discard unused padding present in the original
-    /// `Uninit`.
-    pub fn into_maybe_uninit(self) -> &'a mem::MaybeUninit<T> {
-        // SAFETY: MaybeUninit is a transparent wrapper and need not be initialized.
-        unsafe { &*(self.as_ptr() as *const mem::MaybeUninit<T>) }
-    }
 }
 
 impl<'a, T> UninitView<'a, [T]> {
@@ -725,7 +780,11 @@ impl<'a, T> UninitView<'a, [T]> {
     /// use it as an `Uninit`.
     pub fn empty() -> Self {
         UninitView {
-            ptr: ptr::NonNull::<T>::dangling().cast(),
+            ptr: {
+                let base = ptr::NonNull::<T>::dangling().as_ptr();
+                let slice = ptr::slice_from_raw_parts_mut(base, 0);
+                ptr::NonNull::new(slice).unwrap()
+            },
             len: 0,
             lifetime: PhantomData,
             typed: PhantomData,
@@ -769,7 +828,7 @@ impl<'a, T> UninitView<'a, [T]> {
         let next_len = self.len - bytes;
         self.len = bytes;
 
-        let base = self.ptr.as_ptr();
+        let base = self.ptr.as_ptr() as *mut u8;
         // SAFETY: was previously in bounds.
         let next_base = unsafe { ptr::NonNull::new_unchecked(base.add(bytes)) };
 
@@ -830,7 +889,7 @@ impl<'a, T: ?Sized> UninitView<'a, T> {
     ///
     /// The `cast` to a type of the provided layout will work without error.
     pub fn fits(&self, layout: Layout) -> bool {
-        self.ptr.as_ptr().align_offset(layout.align()) == 0
+        self.ptr.as_ptr().cast::<u8>().align_offset(layout.align()) == 0
             && layout.size() <= self.len
     }
 
