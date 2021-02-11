@@ -1,44 +1,74 @@
-use core::{alloc::Layout, ptr::NonNull};
+//! This module encapsulates correct coercers and coercible pointers.
+//!
+//! The act of Coercion, a special kind of somewhat trivial pointer conversion, is not exposed as a
+//! _safe_ trait. There are two unsafe traits: The first captures which structs unsized to which
+//! dynamically sized types; which the second is applied to (wrappers around) pointers that can be
+//! coerced implicitly.
+//!
+//! We do not have the luxury of compiler builtin checks to enforce that a particular pointer
+//! conversion is sound, nor can we generate the tag of target fat pointer from thin air. Instead,
+//! we use a trick. Note that both of these safety issues occur in the context of the pointer
+//! conversion. Now, we can require the _user_ to _unsafely_ provide a function that implements the
+//! conversion correctly. The _using_ this function is safe and enables any particular user-defined
+//! pointer wrapper to safely transform itself. Note that for a limited selection of standard
+//! traits we can even go so far as offer pre-built converters that are safe to use in general.
+#![allow(unused_unsafe)] // Err on the side of caution.
+use core::alloc::Layout;
 
 mod impls {
+    //! Safety: Provenance is always the same as self, pointer target is simply passed through.
     use core::ptr::NonNull;
-    use super::{CoerceUnsize, unsize_with};
+    use super::CoerceUnsize;
 
     unsafe impl<'lt, T, U: ?Sized + 'lt> CoerceUnsize<U> for &'lt T {
         type Pointee = T;
         type Output = &'lt U;
-        unsafe fn unsize_with<F: Fn(&T) -> &U>(self, with: F) -> Self::Output {
-            &*unsize_with(NonNull::from(self), with).as_ptr()
+        fn as_sized_ptr(&self) -> *mut T {
+            (*self) as *const T as *mut T
+        }
+        unsafe fn replace_ptr(self, new: *mut U) -> &'lt U {
+            unsafe { &*new }
         }
     }
 
+    /// Safety: Provenance is always the same as self.
     unsafe impl<'lt, T, U: ?Sized + 'lt> CoerceUnsize<U> for &'lt mut T {
         type Pointee = T;
         type Output = &'lt mut U;
-        unsafe fn unsize_with<F: Fn(&T) -> &U>(self, with: F) -> Self::Output {
-            &mut *unsize_with(NonNull::from(self), with).as_ptr()
+        fn as_sized_ptr(&self) -> *mut T {
+            (*self) as *const T as *mut T
+        }
+        unsafe fn replace_ptr(self, new: *mut U) -> &'lt mut U {
+            unsafe { &mut *new }
         }
     }
 
-    /* TODO: this actually does _not_ seem self-evident.
-     * Quite the opposite, the requirements on `with` might be stronger. But consider that we only
-     * pass a shared reference so maybe my worries are over nothing.
-    impl<Ptr, U> CoerceUnsize<U> for core::pin::Pin<Ptr>
+    unsafe impl<Ptr, U, T> CoerceUnsize<U> for core::pin::Pin<Ptr>
     where
-        Ptr: CoerceUnsize<U>
+        Ptr: CoerceUnsize<U> + core::ops::Deref<Target=T>,
+        Ptr::Output: core::ops::Deref<Target=T>,
     {
+        type Pointee = T;
         type Output = core::pin::Pin<Ptr::Output>;
-        unsafe fn unsize_with(self, with: impl Fn(&Self) -> &U) -> Self::Output {
-            self.into_inner_unchecked()
+        fn as_sized_ptr(&self) -> *mut Self::Pointee {
+            self.as_ref().get_ref() as *const Self::Pointee as *mut _
+        }
+        unsafe fn replace_ptr(self, new: *mut U) -> Self::Output {
+            let inner = core::pin::Pin::into_inner_unchecked(self);
+            let new = inner.replace_ptr(new);
+            core::pin::Pin::new_unchecked(new)
         }
     }
-    */
 
     unsafe impl<T, U: ?Sized> CoerceUnsize<U> for core::ptr::NonNull<T> {
         type Pointee = T;
         type Output = NonNull<U>;
-        unsafe fn unsize_with<F: Fn(&T) -> &U>(self, with: F) -> Self::Output {
-            unsize_with(NonNull::from(self), with)
+        fn as_sized_ptr(&self) -> *mut T {
+            self.as_ptr()
+        }
+        unsafe fn replace_ptr(self, new: *mut U) -> NonNull<U> {
+            // Safety: 
+            NonNull::new_unchecked(new)
         }
     }
 }
@@ -46,57 +76,176 @@ mod impls {
 /// Enables the unsizing of a sized pointer.
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(transparent)]
-pub struct CoerciblePtr<T> {
-    ptr: NonNull<T>,
+pub struct Coercion<T, U: ?Sized> {
+    coerce: fn(*const T) -> *const U,
 }
 
+/// A stateful coercion of a sized pointer.
+#[derive(Clone, Copy)]
+#[repr(transparent)]
+pub struct CoercionWith<'lt, T, U: ?Sized> {
+    coerce: &'lt dyn Fn(*const T) -> *const U,
+}
+
+impl<T, U: ?Sized> Coercion<T, U> {
+    /// Construct a new coercer.
+    ///
+    /// # Safety
+    ///
+    /// The method must not perform any action other than unsizing the pointer.
+    ///
+    /// # Usage
+    ///
+    /// ```
+    /// use alloc_traits::Coercion;
+    /// use core::fmt::Debug;
+    ///
+    /// let c: Coercion<u32, dyn Debug> = unsafe {
+    ///     Coercion::new(|x| x)
+    /// };
+    /// ```
+    pub unsafe fn new(coerce: fn(*const T) -> *const U) -> Self {
+        Coercion { coerce }
+    }
+}
+
+macro_rules! coerce_to_dyn_trait {
+    ($(#[$attr:meta])* fn $name:ident() -> $trait_type:path) => {
+        impl<'lt, T: $trait_type + 'lt> Coercion<T, dyn $trait_type + 'lt> {
+            $(#[$attr])*
+            pub fn $name() -> Self {
+                fn coerce_to_that_type<'lt, T: $trait_type + 'lt>(
+                    ptr: *const T
+                ) -> *const (dyn $trait_type + 'lt) {
+                    ptr
+                }
+
+                Coercion { coerce: coerce_to_that_type }
+            }
+        }
+    };
+
+    /* TODO: figure out how to make this work.
+     * Then add Iterator<Item=U>, PartialEq<Rhs>, PartialOrd<Rhs>, etc.
+    ($(#[$attr:meta])* fn $name:ident<$($param:ident),*>() -> $trait_type:ty) => {
+        impl<'lt, $($param),*, T: $trait_type + 'lt> Coercion<T, dyn ($trait_type + 'lt)> {
+            $(#[$attr])*
+            pub fn $name() -> Self {
+                fn coerce_to_that_type<'lt, $($param),*, T: $trait_type + 'lt>(
+                    ptr: *const T
+                ) -> *const (dyn $trait_type + 'lt) {
+                    ptr
+                }
+
+                Coercion { coerce: coerce_to_that_type }
+            }
+        }
+    };
+    */
+}
+
+coerce_to_dyn_trait!(
+    /// Create a coercer that unsizes and keeps dynamic type information.
+    ///
+    /// # Usage
+    ///
+    /// ```
+    /// use alloc_traits::{Coercion, CoerceUnsizeExt};
+    /// use core::any::Any;
+    ///
+    /// fn generic<T: Any>(ptr: &T) -> &dyn Any {
+    ///     ptr.unsize(Coercion::to_any())
+    /// }
+    /// ```
+    fn to_any() -> core::any::Any
+);
+
+coerce_to_dyn_trait!(
+    /// Create a coercer that unsizes a parameter to dynamically debug its fields.
+    ///
+    /// # Usage
+    ///
+    /// ```
+    /// use alloc_traits::{Coercion, CoerceUnsizeExt};
+    /// use core::fmt::Debug;
+    ///
+    /// fn generic<T: Debug>(ptr: &T) -> &dyn Debug {
+    ///     ptr.unsize(Coercion::to_debug())
+    /// }
+    /// ```
+    fn to_debug() -> core::fmt::Debug
+);
+
+coerce_to_dyn_trait!(
+    /// Create a coercer that unsizes a parameter to display it.
+    ///
+    /// # Usage
+    ///
+    /// ```
+    /// use alloc_traits::{Coercion, CoerceUnsizeExt};
+    /// use core::fmt::Display;
+    ///
+    /// fn generic<T: Display>(ptr: &T) -> &dyn Display {
+    ///     ptr.unsize(Coercion::to_display())
+    /// }
+    /// ```
+    fn to_display() -> core::fmt::Display
+);
+
 /// Add unsizing methods to pointer-like types.
+///
+/// # Safety
+/// A correct implementation must uphold, when calling `replace_ptr` with valid arguments, that the
+/// pointer target and the provenance of the pointer stay unchanged. This allows calling the
+/// coercion of inner fields of wrappers even when an invariant depends on the pointer target.
 pub unsafe trait CoerceUnsize<U: ?Sized>: Sized {
     /// The type we point to.
     /// This influences which kinds of unsizing are possible.
     type Pointee;
     /// The output type when unsizing the pointee to `U`.
     type Output;
+    /// Get the raw inner pointer.
+    fn as_sized_ptr(&self) -> *mut Self::Pointee;
+    /// Replace the container inner pointer with an unsized version.
+    /// # Safety
+    /// The caller guarantees that the replacement is the same pointer, just a fat pointer variant
+    /// with a correct tag.
+    unsafe fn replace_ptr(self, _: *mut U) -> Self::Output;
+}
+
+/// An extension trait using `CoerceUnsize` for a safe interface.
+pub trait CoerceUnsizeExt<U: ?Sized>: CoerceUnsize<U> {
     /// Convert a pointer, as if with unsize coercion.
     ///
     /// See [`CoerciblePtr::unsize_with`][unsize_with] for details.
     ///
     /// [unsize_with]: struct.CoerciblePtr.html#method.unsize_with
-    unsafe fn unsize_with<F: Fn(&Self::Pointee) -> &U>(self, with: F) -> Self::Output;
-}
-
-impl<T> CoerciblePtr<T> {
-    /// Get the contained pointer as a `NonNull`.
-    pub fn get(self) -> NonNull<T> {
-        self.ptr
-    }
-
-    /// Get the contained pointer.
-    pub fn as_ptr(&self) -> *mut T {
-        self.ptr.as_ptr()
+    fn unsize(self, with: Coercion<Self::Pointee, U>) -> Self::Output {
+        unsafe {
+            let ptr = self.as_sized_ptr();
+            let new_ptr = unsize_with(ptr, with.coerce);
+            self.replace_ptr(new_ptr)
+        }
     }
 
     /// Convert a pointer, as if with unsize coercion.
     ///
-    /// The result pointer will have the same provenance information as the argument `ptr`.
+    /// See [`CoerciblePtr::unsize_with`][unsize_with] for details.
     ///
-    /// # Safety
-    ///
-    /// The caller must guarantee that it is sound to dereference the argument and convert it into a
-    /// reference. This also, very slightly, relies on some of Rust's internal layout but it will
-    /// assert that they actually hold. If this sounds too risky, do not use this method. The caller
-    /// must also guarantee that `with` will only execute a coercion and _not_ change the pointer
-    /// itself.
-    ///
-    /// # Usage
-    ///
-    /// ```
-    ///
-    /// ```
-    pub unsafe fn unsize_with<U: ?Sized>(self, with: impl Fn(&T) -> &U) -> NonNull<U> {
-        unsize_with(self.ptr, with)
+    /// [unsize_with]: struct.CoerciblePtr.html#method.unsize_with
+    fn unsize_with(self, with: CoercionWith<Self::Pointee, U>) -> Self::Output {
+        unsafe {
+            let ptr = self.as_sized_ptr();
+            let new_ptr = unsize_with(ptr, with.coerce);
+            self.replace_ptr(new_ptr)
+        }
     }
 }
+
+impl<T, U: ?Sized> CoerceUnsizeExt<U> for T
+where
+    T: CoerceUnsize<U>
+{}
 
 /// Convert a pointer, as if with unsize coercion.
 ///
@@ -109,25 +258,18 @@ impl<T> CoerciblePtr<T> {
 /// assert that they actually hold. If this sounds too risky, do not use this method. The caller
 /// must also guarantee that `with` will only execute a coercion and _not_ change the pointer
 /// itself.
-#[allow(unused_unsafe)] // Err on the side of caution.
 unsafe fn unsize_with<T, U: ?Sized>(
-    ptr: NonNull<T>,
-    with: impl Fn(&T) -> &U,
-) -> NonNull<U> {
-    let raw = ptr.as_ptr();
-
-    let mut raw_unsized = {
-        // Safety: caller upholds this directly.
-        let temp_reference = unsafe { &*raw };
-        with(temp_reference) as *const U
-    };
+    ptr: *mut T,
+    with: impl Fn(*const T) -> *const U,
+) -> *mut U {
+    let mut raw_unsized = with(ptr) as *mut U;
 
     debug_assert_eq!(Layout::for_value(&raw_unsized), Layout::new::<[usize; 2]>(),
         "Unexpected layout of unsized pointer.");
-    debug_assert_eq!(raw_unsized as *const u8 as usize, raw as usize,
+    debug_assert_eq!(raw_unsized as *const u8 as usize, ptr as usize,
         "Unsize coercion seemingly changed the pointer base");
 
-    let ptr_slot = &mut raw_unsized as *mut *const U as *mut *const u8;
+    let ptr_slot = &mut raw_unsized as *mut *mut U as *mut *const u8;
     // Safety: Not totally clear as it relies on the standard library implementation of pointers.
     // The layout is usually valid for such a write (we've asserted that above) and all pointers
     // are larger and at least as aligned as a single pointer to bytes.
@@ -140,8 +282,19 @@ unsafe fn unsize_with<T, U: ?Sized>(
     // This can be used since we haven't used any pointer from which it was derived. This
     // invalidates the access tags of `temp_reference` and the original `raw_unsized` value but
     // both will no longer be used.
-    unsafe { ptr_slot.write(raw as *const u8) };
+    unsafe { ptr_slot.write(ptr as *const u8) };
 
     // Safety: the base pointer that we've just written was not null.
-    unsafe { NonNull::new_unchecked(raw_unsized as *mut U) }
+    raw_unsized
 }
+
+/// Ensure that using `CoerceUnsizeExt` does not import as_sized_ptr.
+///
+/// ```compile_fail
+/// use alloc_traits::CoerceUnsizeExt;
+/// use core::ptr::NonNull;
+///
+/// let ptr = NonNull::from(&2u32);
+/// let _ = ptr.as_sized_ptr();
+/// ```
+extern {}

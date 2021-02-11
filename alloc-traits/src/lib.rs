@@ -28,4 +28,4 @@ pub use crate::layout::{Layout, NonZeroLayout};
 pub use crate::local::{AllocTime, Allocation, LocalAlloc};
 #[allow(deprecated)]
 pub use crate::local::Invariant;
-pub use crate::unsize::{CoerceUnsize, CoerciblePtr};
+pub use crate::unsize::{Coercion, CoerceUnsize, CoerceUnsizeExt};
