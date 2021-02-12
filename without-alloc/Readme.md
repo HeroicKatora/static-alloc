@@ -2,8 +2,8 @@
 
 [![Crates.io Status](https://img.shields.io/crates/v/without-alloc.svg)](https://crates.io/crates/without-alloc)
 [![Docs.rs Status](https://docs.rs/without-alloc/badge.svg)](https://docs.rs/without-alloc/)
-[![License](https://img.shields.io/badge/license-MIT-blue.svg)](https://raw.githubusercontent.com/HeroicKatora/without-alloc/LICENSE)
-[![CI Status](https://api.cirrus-ci.com/github/HeroicKatora/alloc-free.svg)](https://cirrus-ci.com/github/HeroicKatora/alloc-free)
+[![License](https://img.shields.io/badge/license-Zlib-blue.svg)](https://raw.githubusercontent.com/HeroicKatora/static-alloc/master/LICENSE.ZLIB)
+[![CI Status](https://api.cirrus-ci.com/github/HeroicKatora/static-alloc.svg)](https://cirrus-ci.com/github/HeroicKatora/static-alloc)
 
 Dynamic data structures that do not require a global allocator.
 
