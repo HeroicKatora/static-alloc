@@ -18,9 +18,9 @@ use core::alloc::Layout;
 mod impls {
     //! Safety: Provenance is always the same as self, pointer target is simply passed through.
     use core::ptr::NonNull;
-    use super::CoerceUnsize;
+    use super::CoerciblePtr;
 
-    unsafe impl<'lt, T, U: ?Sized + 'lt> CoerceUnsize<U> for &'lt T {
+    unsafe impl<'lt, T, U: ?Sized + 'lt> CoerciblePtr<U> for &'lt T {
         type Pointee = T;
         type Output = &'lt U;
         fn as_sized_ptr(&self) -> *mut T {
@@ -32,7 +32,7 @@ mod impls {
     }
 
     /// Safety: Provenance is always the same as self.
-    unsafe impl<'lt, T, U: ?Sized + 'lt> CoerceUnsize<U> for &'lt mut T {
+    unsafe impl<'lt, T, U: ?Sized + 'lt> CoerciblePtr<U> for &'lt mut T {
         type Pointee = T;
         type Output = &'lt mut U;
         fn as_sized_ptr(&self) -> *mut T {
@@ -43,9 +43,9 @@ mod impls {
         }
     }
 
-    unsafe impl<Ptr, U, T> CoerceUnsize<U> for core::pin::Pin<Ptr>
+    unsafe impl<Ptr, U, T> CoerciblePtr<U> for core::pin::Pin<Ptr>
     where
-        Ptr: CoerceUnsize<U> + core::ops::Deref<Target=T>,
+        Ptr: CoerciblePtr<U> + core::ops::Deref<Target=T>,
         Ptr::Output: core::ops::Deref<Target=T>,
     {
         type Pointee = T;
@@ -60,7 +60,7 @@ mod impls {
         }
     }
 
-    unsafe impl<T, U: ?Sized> CoerceUnsize<U> for core::ptr::NonNull<T> {
+    unsafe impl<T, U: ?Sized> CoerciblePtr<U> for core::ptr::NonNull<T> {
         type Pointee = T;
         type Output = NonNull<U>;
         fn as_sized_ptr(&self) -> *mut T {
@@ -150,7 +150,7 @@ coerce_to_dyn_trait!(
     /// # Usage
     ///
     /// ```
-    /// use alloc_traits::{Coercion, CoerceUnsizeExt};
+    /// use alloc_traits::{Coercion, CoerceUnsize};
     /// use core::any::Any;
     ///
     /// fn generic<T: Any>(ptr: &T) -> &dyn Any {
@@ -166,7 +166,7 @@ coerce_to_dyn_trait!(
     /// # Usage
     ///
     /// ```
-    /// use alloc_traits::{Coercion, CoerceUnsizeExt};
+    /// use alloc_traits::{Coercion, CoerceUnsize};
     /// use core::fmt::Debug;
     ///
     /// fn generic<T: Debug>(ptr: &T) -> &dyn Debug {
@@ -182,7 +182,7 @@ coerce_to_dyn_trait!(
     /// # Usage
     ///
     /// ```
-    /// use alloc_traits::{Coercion, CoerceUnsizeExt};
+    /// use alloc_traits::{Coercion, CoerceUnsize};
     /// use core::fmt::Display;
     ///
     /// fn generic<T: Display>(ptr: &T) -> &dyn Display {
@@ -198,7 +198,7 @@ coerce_to_dyn_trait!(
 /// A correct implementation must uphold, when calling `replace_ptr` with valid arguments, that the
 /// pointer target and the provenance of the pointer stay unchanged. This allows calling the
 /// coercion of inner fields of wrappers even when an invariant depends on the pointer target.
-pub unsafe trait CoerceUnsize<U: ?Sized>: Sized {
+pub unsafe trait CoerciblePtr<U: ?Sized>: Sized {
     /// The type we point to.
     /// This influences which kinds of unsizing are possible.
     type Pointee;
@@ -213,8 +213,8 @@ pub unsafe trait CoerceUnsize<U: ?Sized>: Sized {
     unsafe fn replace_ptr(self, _: *mut U) -> Self::Output;
 }
 
-/// An extension trait using `CoerceUnsize` for a safe interface.
-pub trait CoerceUnsizeExt<U: ?Sized>: CoerceUnsize<U> {
+/// An extension trait using `CoerciblePtr` for a safe interface.
+pub trait CoerceUnsize<U: ?Sized>: CoerciblePtr<U> {
     /// Convert a pointer, as if with unsize coercion.
     ///
     /// See [`CoerciblePtr::unsize_with`][unsize_with] for details.
@@ -242,9 +242,9 @@ pub trait CoerceUnsizeExt<U: ?Sized>: CoerceUnsize<U> {
     }
 }
 
-impl<T, U: ?Sized> CoerceUnsizeExt<U> for T
+impl<T, U: ?Sized> CoerceUnsize<U> for T
 where
-    T: CoerceUnsize<U>
+    T: CoerciblePtr<U>
 {}
 
 /// Convert a pointer, as if with unsize coercion.
@@ -288,10 +288,10 @@ unsafe fn unsize_with<T, U: ?Sized>(
     raw_unsized
 }
 
-/// Ensure that using `CoerceUnsizeExt` does not import as_sized_ptr.
+/// Ensure that using `CoerceUnsize` does not import as_sized_ptr.
 ///
 /// ```compile_fail
-/// use alloc_traits::CoerceUnsizeExt;
+/// use alloc_traits::CoerceUnsize;
 /// use core::ptr::NonNull;
 ///
 /// let ptr = NonNull::from(&2u32);

@@ -23,7 +23,7 @@ use core::alloc::Layout;
 use core::marker::PhantomData;
 
 use crate::boxed::Box;
-use alloc_traits::CoerceUnsize;
+use alloc_traits::CoerciblePtr;
 
 /// Points to an uninitialized place but would otherwise be a valid reference.
 ///
@@ -973,7 +973,7 @@ impl<T: ?Sized> Clone for UninitView<'_, T> {
 
 impl<T: ?Sized> Copy for UninitView<'_, T> { }
 
-unsafe impl<'a, T, U: ?Sized> CoerceUnsize<U> for UninitView<'a, T> {
+unsafe impl<'a, T, U: ?Sized> CoerciblePtr<U> for UninitView<'a, T> {
     type Pointee = T;
     type Output = UninitView<'a, U>;
     fn as_sized_ptr(&self) -> *mut T {
@@ -988,7 +988,7 @@ unsafe impl<'a, T, U: ?Sized> CoerceUnsize<U> for UninitView<'a, T> {
     }
 }
 
-unsafe impl<'a, T, U: ?Sized> CoerceUnsize<U> for Uninit<'a, T> {
+unsafe impl<'a, T, U: ?Sized> CoerciblePtr<U> for Uninit<'a, T> {
     type Pointee = T;
     type Output = Uninit<'a, U>;
 

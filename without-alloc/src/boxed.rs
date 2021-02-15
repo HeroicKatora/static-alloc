@@ -5,7 +5,7 @@
 //! [`Box`]: struct.Box.html
 use core::{borrow, cmp, fmt, hash, mem, ops, ptr};
 use crate::uninit::Uninit;
-use alloc_traits::CoerceUnsize;
+use alloc_traits::CoerciblePtr;
 
 /// An allocated instance of a type.
 ///
@@ -71,7 +71,7 @@ pub struct Box<'a, T: ?Sized> {
 ///
 /// ```
 /// # use without_alloc::boxed::Box;
-/// use alloc_traits::{Coercion, CoerceUnsizeExt};
+/// use alloc_traits::{Coercion, CoerceUnsize};
 /// use without_alloc::Uninit;
 /// use core::mem::MaybeUninit;
 ///
@@ -82,7 +82,7 @@ pub struct Box<'a, T: ?Sized> {
 ///     boxed.unsize(Coercion::to_debug())
 /// };
 /// ```
-unsafe impl<'a, T, U: ?Sized> CoerceUnsize<U> for Box<'a, T> {
+unsafe impl<'a, T, U: ?Sized> CoerciblePtr<U> for Box<'a, T> {
     type Pointee = T;
     type Output = Box<'a, U>;
     fn as_sized_ptr(&self) -> *mut T {
