@@ -192,6 +192,27 @@ coerce_to_dyn_trait!(
     fn to_display() -> core::fmt::Display
 );
 
+impl<T, const N: usize> Coercion<[T; N], [T]> {
+    /// Create a coercer that unsizes an array to a slice.
+    ///
+    /// # Usage
+    ///
+    /// ```
+    /// use alloc_traits::{Coercion, CoerceUnsize};
+    /// use core::fmt::Display;
+    ///
+    /// fn generic<T>(ptr: &[T; 2]) -> &[T] {
+    ///     ptr.unsize(Coercion::to_slice())
+    /// }
+    /// ```
+    pub fn to_slice() -> Self {
+        fn coerce<T, const N: usize>(
+            ptr: *const [T; N]
+        ) -> *const [T] { ptr }
+        Coercion { coerce }
+    }
+}
+
 /// Add unsizing methods to pointer-like types.
 ///
 /// # Safety
