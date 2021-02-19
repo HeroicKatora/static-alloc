@@ -192,6 +192,7 @@ coerce_to_dyn_trait!(
     fn to_display() -> core::fmt::Display
 );
 
+#[cfg(rustc_1_51)]
 impl<T, const N: usize> Coercion<[T; N], [T]> {
     /// Create a coercer that unsizes an array to a slice.
     ///

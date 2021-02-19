@@ -15,5 +15,8 @@ name = "alloc_traits"
 
 [dependencies]
 
+[build-dependencies]
+autocfg = "1"
+
 [package.metadata.docs.rs]
 all-features = true
