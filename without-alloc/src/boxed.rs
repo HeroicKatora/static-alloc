@@ -5,6 +5,7 @@
 //! [`Box`]: struct.Box.html
 use core::{borrow, cmp, fmt, hash, mem, ops, ptr};
 use crate::uninit::Uninit;
+use alloc_traits::CoerciblePtr;
 
 /// An allocated instance of a type.
 ///
@@ -61,6 +62,37 @@ use crate::uninit::Uninit;
 /// one `usize` more space usage) via a wrapper when an allocator is available.
 pub struct Box<'a, T: ?Sized> {
     inner: Uninit<'a, T>,
+}
+
+
+/// Unsize a Box, for example into a dynamic trait object.
+///
+/// # Usage
+///
+/// ```
+/// # use without_alloc::boxed::Box;
+/// use alloc_traits::{Coercion, CoerceUnsize};
+/// use without_alloc::Uninit;
+/// use core::mem::MaybeUninit;
+///
+/// let mut memory: MaybeUninit<usize> = MaybeUninit::uninit();
+/// let boxed = Box::new(0usize, Uninit::from(&mut memory));
+///
+/// let debug: Box<dyn core::fmt::Debug> = unsafe {
+///     boxed.unsize(Coercion::to_debug())
+/// };
+/// ```
+unsafe impl<'a, T, U: ?Sized> CoerciblePtr<U> for Box<'a, T> {
+    type Pointee = T;
+    type Output = Box<'a, U>;
+    fn as_sized_ptr(&self) -> *mut T {
+        self.inner.as_ptr()
+    }
+    unsafe fn replace_ptr(self, new: *mut U) -> Box<'a, U> {
+        let inner = Box::into_raw(self);
+        let inner = inner.replace_ptr(new);
+        Box::from_raw(inner)
+    }
 }
 
 impl<'a, T> Box<'a, T> {

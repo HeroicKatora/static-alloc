@@ -36,8 +36,15 @@ release_task:
     image: rust:latest
   script: ./release_checks without-alloc
 
+miri_alloc_traits_task:
+  container:
+    image: rustlang/rust:nightly
+  script:
+    - rustup component add --toolchain nightly miri
+    - cd alloc-traits
+    - rustup run nightly cargo-miri miri test
+
 miri_without_alloc_task:
-  only_if: $CIRRUS_BRANCH =~ 'release-without-alloc.*'
   container:
     image: rustlang/rust:nightly
   script:
