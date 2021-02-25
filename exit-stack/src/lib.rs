@@ -1,3 +1,4 @@
+//! TODO
 #![no_std]
 use core::cell::Cell;
 use core::mem::MaybeUninit;
@@ -7,6 +8,13 @@ use core::ptr::NonNull;
 use static_alloc::leaked::LeakBox;
 use static_alloc::unsync::Bump;
 
+/// Provides memory suitable for dynamically stack-allocating pinned values.
+///
+/// # Usage
+///
+/// TODO: some example for stack pinning..
+///
+/// Alternatively, you can also use this as a pre-allocated buffer for pinning values to the heap.
 pub struct ExitStack<Mem> {
     memory: Bump<Mem>,
     top: Cell<Option<ExitHandle>>,
@@ -14,21 +22,33 @@ pub struct ExitStack<Mem> {
 
 type ExitHandle = NonNull<PinSlot<dyn Drop>>;
 
-pub struct ExitStackSlot<'lt, T> {
+/// A stack allocation that one can pin a value into.
+///
+/// This contains two references: One to uninitialized stack allocated memory large enough to store
+/// a value of the requested type into, and another reference to the head of a linked list of
+/// pinned values. When the caller decides to fill the slot then it is written to the stack memory
+/// and prepended to the linked list such that the value is guaranteed to drop before all other
+/// values contained in it.
+pub struct Slot<'lt, T> {
+    /// The slot which we can fill with a value and meta data.
+    value: LeakBox<'lt, MaybeUninit<PinSlot<T>>>,
     /// Where we will commit ourselves to pin the value. If we write a pointer here then it _must_
     /// be dropped before the box's memory is invalidated.
     slotter: &'lt Cell<Option<ExitHandle>>,
-    /// The slot which we can fill with a value and meta data.
-    value: LeakBox<'lt, MaybeUninit<PinSlot<T>>>,
 }
 
 /// One entry in the exit stack linked list.
+///
+/// It contains the link to the next entry and a pinned value that must be dropped in-place.
 struct PinSlot<T: ?Sized> {
     link: Option<ExitHandle>,
     value: T,
 }
 
 impl<Mem> ExitStack<Mem> {
+    /// Create an empty exit stack.
+    ///
+    /// The available memory for the stack is specified by the `Mem` type parameter.
     pub fn new() -> Self {
         ExitStack {
             memory: Bump::uninit(),
@@ -38,11 +58,11 @@ impl<Mem> ExitStack<Mem> {
 
     /// Prepare a slot for pinning a value to the stack.
     pub fn slot<'stack, T: 'static>(self: Pin<&'stack Self>)
-        -> Option<ExitStackSlot<'stack, T>>
+        -> Option<Slot<'stack, T>>
     {
         let this: &'stack Self = self.get_ref();
         let value = this.memory.bump_box().ok()?;
-        Some(ExitStackSlot {
+        Some(Slot {
             slotter: &this.top,
             value,
         })
@@ -91,7 +111,7 @@ impl<Mem> ExitStack<Mem> {
     }
 }
 
-impl<'lt, T> ExitStackSlot<'lt, T> {
+impl<'lt, T> Slot<'lt, T> {
     /// Pin a value to the stack.
     ///
     /// Returns the value if there is no more space in the reserved portion of memory to pin the
@@ -121,9 +141,33 @@ impl<'lt, T> ExitStackSlot<'lt, T> {
         unsafe { Pin::new_unchecked(&mut (*pointer).value) }
     }
 
+    /// Pin a short-lived value to this exit stack.
+    ///
+    /// # Safety
+    ///
+    /// The caller guarantees that the exit stack is dropped _before_ the validity of `T` expires.
     #[allow(dead_code)] // Might pub this later.
-    unsafe fn pin_local(self, _: T) -> Pin<&'lt mut T> {
-        unimplemented!()
+    pub unsafe fn pin_local(self, value: T) -> Pin<&'lt mut T> {
+        // Store the old pointer into our linked list.
+        let link = self.slotter.get();
+        let boxed = LeakBox::write(self.value, PinSlot { link, value });
+        // Now round-trip through pointer. Guarantees that the returned value is based on the
+        // pointer we store in the exit stack, which is required for provenance reasons.
+        // Has Shared-read-write ..
+        let pointer = LeakBox::into_raw(boxed);
+        // .. so does this shared-read-write.
+        let raw_handle: *mut PinSlot<dyn Drop + 'lt> = pointer;
+        // Transmute away the lifetime. This is safe because we will only dereference the handle
+        // while the ExitStack is alive or just being dropped, and the caller promised us that it
+        // is okay in that lifetime.
+        let exit_handle: *mut PinSlot<dyn Drop> = core::mem::transmute(raw_handle);
+        // Overwrite the pointer that is dropped first. The old still has a guarantee of being
+        // dropped because the ExitStack will iterate over us, guaranteed with this same write as
+        // we've set the link to the old pointer.
+        self.slotter.set(NonNull::new(exit_handle));
+        // .. so this is unique write above these two pointers.
+        // Pin is sound because we've registered ourselves in slotter.
+        Pin::new_unchecked(&mut (*pointer).value)
     }
 }
 
