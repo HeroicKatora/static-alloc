@@ -67,7 +67,7 @@ mod impls {
             self.as_ptr()
         }
         unsafe fn replace_ptr(self, new: *mut U) -> NonNull<U> {
-            // Safety: 
+            // Safety:
             NonNull::new_unchecked(new)
         }
     }
@@ -213,6 +213,75 @@ impl<T, const N: usize> Coercion<[T; N], [T]> {
         Coercion { coerce }
     }
 }
+
+macro_rules! coerce_to_dyn_fn {
+    ($($arg:ident),*) => {
+        coerce_to_dyn_fn!(
+            @<$($arg,)*>:
+            (dyn Fn($($arg,)*) -> T + 'lt),
+            (dyn FnMut($($arg,)*) -> T + 'lt),
+            (dyn FnOnce($($arg,)*) -> T + 'lt)
+        );
+    };
+    (@<$($arg:ident,)*>: $dyn:ty, $dyn_mut:ty, $dyn_once:ty) => {
+        impl<'lt, T, $($arg,)* F: 'lt + Fn($($arg,)*) -> T> Coercion<F, $dyn> {
+            /// Create a coercer that unsizes to a dynamically dispatched function.
+            pub fn to_fn() -> Self {
+                fn coerce<'lt, T, $($arg,)* F: 'lt + Fn($($arg,)*) -> T>(
+                    ptr: *const F
+                ) -> *const $dyn { ptr }
+                Coercion { coerce }
+            }
+        }
+
+        impl<'lt, T, $($arg,)* F: 'lt + FnMut($($arg,)*) -> T> Coercion<F, $dyn_mut> {
+            /// Create a coercer that unsizes to a dynamically dispatched mutable function.
+            pub fn to_fn_once() -> Self {
+                fn coerce<'lt, T, $($arg,)* F: 'lt + FnMut($($arg,)*) -> T>(
+                    ptr: *const F
+                ) -> *const $dyn_mut { ptr }
+                Coercion { coerce }
+            }
+        }
+
+        impl<'lt, T, $($arg,)* F: 'lt + FnOnce($($arg,)*) -> T> Coercion<F, $dyn_once> {
+            /// Create a coercer that unsizes to a dynamically dispatched once function.
+            pub fn to_fn_once() -> Self {
+                fn coerce<'lt, T, $($arg,)* F: 'lt + FnOnce($($arg,)*) -> T>(
+                    ptr: *const F
+                ) -> *const $dyn_once { ptr }
+                Coercion { coerce }
+            }
+        }
+    };
+}
+
+coerce_to_dyn_fn!();
+coerce_to_dyn_fn!(A);
+coerce_to_dyn_fn!(A,B);
+coerce_to_dyn_fn!(A,B,C);
+coerce_to_dyn_fn!(A,B,C,D);
+coerce_to_dyn_fn!(A,B,C,D,E);
+coerce_to_dyn_fn!(A,B,C,D,E,G);
+
+/// ```
+/// use alloc_traits::{Coercion, CoerceUnsize};
+/// fn arg0<F: 'static + FnOnce()>(fptr: &F) -> &dyn FnOnce() {
+///     fptr.unsize(Coercion::<_, dyn FnOnce()>::to_fn_once())
+/// }
+/// fn arg1<F: 'static + FnOnce(u32)>(fptr: &F) -> &dyn FnOnce(u32) {
+///     fptr.unsize(Coercion::<_, dyn FnOnce(u32)>::to_fn_once())
+/// }
+/// fn arg6<F: 'static + FnOnce(u32,u32,u32,u32,u32,u32)>(fptr: &F) 
+///     -> &dyn FnOnce(u32,u32,u32,u32,u32,u32)
+/// {
+///     fptr.unsize(Coercion::<_, dyn FnOnce(u32,u32,u32,u32,u32,u32)>::to_fn_once())
+/// }
+/// arg0(&|| {});
+/// arg1(&|_| {});
+/// arg6(&|_,_,_,_,_,_| {});
+/// ```
+extern {}
 
 /// Add unsizing methods to pointer-like types.
 ///
