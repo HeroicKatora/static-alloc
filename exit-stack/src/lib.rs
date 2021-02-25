@@ -1,4 +1,49 @@
-//! TODO
+//! Dynamically pin values to the stack.
+//!
+//! This is motivated by a short-coming of pinning in situations where no global allocator is
+//! available (or the use of one is not desired). The usual solution for pinning a value to the
+//! stack is by utilizing the `pin_utils` macro, which works by shadowing a value and thus making
+//! it impossible to avoid its Drop impl being run. However, by design this can only work if the
+//! number of values is statically known.
+//!
+//! This crate complements the mechanism. It leverages a pinned wrapper around an area of memory to
+//! constructs a linked list of values that are dropped together with that region, and thus can be
+//! treated as pinned as well. The downside of this is a more imprecise tracking which requires the
+//! values themselves to live for the `'static` lifetime by default.
+//!
+//! # Usage
+//!
+//! Use this to have subroutines that starts some task that must be pinned while it is running. An
+//! example for this is a DMA transfer, that absolutely must signal or wait for the remote end when
+//! it is dropped (as otherwise some memory might get corrupted later). This would usually not be
+//! easily possible as stack-pinning the tasks within the subroutine would immediately drop them on
+//! exit.
+//!
+//! ```
+//! use core::pin::Pin;
+//! use exit_stack::ExitStack;
+//!
+//! #[derive(Default)]
+//! struct DmaTask {
+//!     // ..
+//! # _inner: (),
+//! }
+//!
+//! impl DmaTask {
+//!     // Start a DMA transfer, return an identifier for it.
+//!     pub fn start(self: Pin<&mut Self>) -> usize {
+//!         // ..
+//! # 0
+//!     }
+//! }
+//!
+//! fn start_pinned(mut stack: Pin<&ExitStack<DmaTask>>) -> Option<usize> {
+//!     let task = stack
+//!         .slot()?
+//!         .pin(DmaTask::default());
+//!     Some(task.start())
+//! }
+//! ```
 #![no_std]
 use core::cell::Cell;
 use core::mem::MaybeUninit;
@@ -10,13 +55,14 @@ use static_alloc::unsync::Bump;
 
 /// Provides memory suitable for dynamically stack-allocating pinned values.
 ///
-/// # Usage
-///
-/// TODO: some example for stack pinning..
-///
 /// Alternatively, you can also use this as a pre-allocated buffer for pinning values to the heap.
+/// The internal implementation guarantees that the stack can allocate _at least one_ value of type
+/// `Mem`. Also, there will be no changes that _reduce_ the amount of values in a patch version, it
+/// will require require at least a minor version bump.
 pub struct ExitStack<Mem> {
-    memory: Bump<Mem>,
+    /// Memory, padded to hold _at least_ one slot of `Mem`.
+    memory: Bump<PinSlot<Mem>>,
+    /// The exit handler to the last filled slot of the exit stack.
     top: Cell<Option<ExitHandle>>,
 }
 
@@ -57,6 +103,9 @@ impl<Mem> ExitStack<Mem> {
     }
 
     /// Prepare a slot for pinning a value to the stack.
+    ///
+    /// Note that dropping may be delayed arbitrarily since this method can't control when the
+    /// `ExitStack` itself is dropped. Thus the pinned value must not borrow temporary data.
     pub fn slot<'stack, T: 'static>(self: Pin<&'stack Self>)
         -> Option<Slot<'stack, T>>
     {
@@ -66,6 +115,58 @@ impl<Mem> ExitStack<Mem> {
             slotter: &this.top,
             value,
         })
+    }
+
+    /// Infallibly get a slot for the type of the memory, and pin a value.
+    ///
+    /// This is useful a small utility wrapper if you want to have a small 'stack' that can make
+    /// room for a single entry, on demand. All other entries in the exit stack will be popped, and
+    /// the memory allocator will be cleared before the new value is pinned.
+    ///
+    /// You can also use this method to defer dropping of a pinned task beyond your own method's
+    /// body.
+    ///
+    /// # Usage
+    ///
+    /// ```
+    /// use core::pin::Pin;
+    /// use exit_stack::ExitStack;
+    /// # use core::future::Future;
+    /// # use core::task::{Context, Poll};
+    ///
+    /// // Some async future that is not Unpin.
+    /// #[derive(Default)]
+    /// struct Task {
+    ///     // ..
+    /// # _i: core::marker::PhantomPinned,
+    /// }
+    ///
+    /// # impl Future for Task {
+    /// #   type Output = u32;
+    /// #   fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+    /// #     Poll::Ready(0)
+    /// #   }
+    /// # }
+    ///
+    /// async fn with_stack(mut stack: Pin<&mut ExitStack<Task>>) {
+    ///     stack.as_mut().set(Task::default()).await;
+    ///     // Reuse the stack another time.
+    ///     // The previous task is dropped.
+    ///     stack.as_mut().set(Task::default()).await;
+    ///     // Note that the second task still lives when we return.
+    /// }
+    /// ```
+    pub fn set<'stack>(mut self: Pin<&'stack mut Self>, val: Mem)
+        -> Pin<&'stack mut Mem>
+    where
+        Mem: 'static,
+    {
+        self.as_mut().pop_all();
+        // The memory was reset here..
+        match self.into_ref().slot() {
+            Some(slot) => slot.pin(val),
+            None => unreachable!("The memory can allocate at least one slot"),
+        }
     }
 
     /// Drop all values, resetting the stack.
@@ -108,6 +209,9 @@ impl<Mem> ExitStack<Mem> {
             unsafe { core::ptr::drop_in_place(&mut slot.value) };
             flag.chain = slot.link;
         }
+
+        // No more values are present, feel free to move anything.
+        self.memory.reset()
     }
 }
 
