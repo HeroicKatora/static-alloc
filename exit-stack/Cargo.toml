@@ -1,0 +1,17 @@
+[package]
+name = "exit-stack"
+version = "0.1.0"
+description = "Dynamically pin values to the stack, with no macros."
+authors = ["Andreas Molzer <andreas.molzer@gmx.de>"]
+edition = "2018"
+license = "MIT"
+documentation = "https://docs.rs/exit-stack"
+repository = "https://github.com/HeroicKatora/static-alloc"
+readme = "Readme.md"
+categories = ["embedded", "memory-management", "no-std"]
+
+[dependencies]
+static-alloc = { path = "../static-alloc" }
+
+[dev-dependencies]
+pin-utils = "0.1"
