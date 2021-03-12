@@ -1,6 +1,7 @@
 [workspace]
 members = [
 	"alloc-traits",
+	"buffer-vec",
 	"exit-stack",
 	"fill",
 	"static-alloc",
