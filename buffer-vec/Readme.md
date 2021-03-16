@@ -1,4 +1,7 @@
-This crate provides a buffer whose allocation one can be used by vectors of
+The `BufferVec` makes it possible to re-use allocations across multiple
+invocations of zero-copy parsers.
+
+This crate provides an allocated buffer that can be used by vectors of
 different element types, as long as they have the same layout. Most prominently
 this allows use of one buffer where the element type depends on a function
 local lifetime. The required vector type would be impossible to name outside

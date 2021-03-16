@@ -9,6 +9,7 @@
 //! generic lifetime parameter in one of your proofs but this is not possible in constants.
 //! Instead, wait for `const {}` blocks to stabilize.
 use core::alloc::Layout;
+use core::mem::MaybeUninit;
 use core::marker::PhantomData;
 use core::ptr::NonNull;
 
@@ -36,6 +37,9 @@ impl<A, B> SameLayout<A, B> {
     /// NOTE: This will _forget_ all elements. You must clear the vector first if they are
     /// important, or `set_len` on the result if you can guarantee that old elements are valid
     /// initializers for the new type.
+    /// This affords more flexibility for the caller as they might want to use As as an initializer
+    /// for Bs which would be invalid if we dropped them. Manually drain the vector if this is not
+    /// desirable.
     pub fn forget_vec(self, vec: Vec<A>) -> Vec<B> {
         let mut vec = core::mem::ManuallyDrop::new(vec);
         let cap = vec.capacity();
@@ -47,6 +51,20 @@ impl<A, B> SameLayout<A, B> {
         // - capacity is the capacity the Vec was allocated with.
         // - All elements (there are none) as initialized.
         unsafe { Vec::from_raw_parts(ptr as *mut B, 0, cap) }
+    }
+
+    /// 'Transmute' a box by reusing its buffer.
+    /// NOTE: for the same flexibility as Vec, forget about the returned `A`.
+    pub fn deinit_box(self, boxed: Box<A>) -> (A, Box<MaybeUninit<B>>) {
+        let ptr = Box::into_raw(boxed);
+        // SAFETY: just was a valid box..
+        let a = unsafe { core::ptr::read(ptr) };
+        // SAFETY:
+        // - ptr was previously allocated with Box.
+        // - The ptr is valid for reads and writes as it comes from a Box.
+        // - B has the same alignment and size as per our invariants.
+        // - Any instance of MaybeUninit is always valid.
+        (a, unsafe { Box::from_raw(ptr as *mut MaybeUninit<B>) })
     }
 }
 
