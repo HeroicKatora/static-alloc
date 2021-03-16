@@ -1,4 +1,4 @@
-The `BufferVec` makes it possible to re-use allocations across multiple
+The `SameVec` makes it possible to re-use allocations across multiple
 invocations of zero-copy parsers.
 
 This crate provides an allocated buffer that can be used by vectors of
@@ -18,7 +18,7 @@ fn select_median_name(unparsed: &str) -> &str {
 
 fn select_median_name_with_buffer<'names>(
     unparsed: &'names str,
-    buf: &mut BufferVec<*const str>,
+    buf: &mut SameVec<*const str>,
 ) -> &'names str {
     let mut names = buf.use_for(same::for_ref());
     names.extend(unparsed.split(' '));

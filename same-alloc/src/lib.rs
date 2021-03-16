@@ -1,4 +1,4 @@
-//! The `BufferVec` makes it possible to re-use allocations across multiple invocations of
+//! The `SameVec` makes it possible to re-use allocations across multiple invocations of
 //! zero-copy parsers.
 //!
 //! This crate provides an allocated buffer that can be used by vectors of
@@ -20,7 +20,7 @@
 //!
 //! fn select_median_name_with_buffer<'names>(
 //!     unparsed: &'names str,
-//!     buf: &mut BufferVec<*const str>,
+//!     buf: &mut SameVec<*const str>,
 //! ) -> &'names str {
 //!     let mut names = buf.use_for(same::for_ref());
 //!     names.extend(unparsed.split(' '));
@@ -37,21 +37,21 @@ pub mod same;
 use alloc::vec::Vec;
 pub use crate::same::SameLayout;
 
-/// A dynamically sized buffer for various types.
-pub struct BufferVec<T> {
+/// A dynamically sized buffer for types with the same layout.
+pub struct SameVec<T> {
     elements: Vec<T>,
 }
 
-/// A temporary view on a BufferVec, with a different element type.
+/// A temporary view on a SameVec, with a different element type.
 pub struct TempVec<'lt, T> {
     from: &'lt mut dyn DynBufferWith<T>,
     vec: Vec<T>,
 }
 
-impl<T> BufferVec<T> {
+impl<T> SameVec<T> {
     /// Create an empty buffer.
     pub fn new() -> Self {
-        BufferVec::default()
+        SameVec::default()
     }
 
     /// Create a buffer with a pre-defined capacity.
@@ -59,7 +59,7 @@ impl<T> BufferVec<T> {
     /// This buffer will not need to reallocate until the element count required for any temporary
     /// vector exceeds this number of elements.
     pub fn with_capacity(cap: usize) -> Self {
-        BufferVec {
+        SameVec {
             elements: Vec::with_capacity(cap),
         }
     }
@@ -76,9 +76,9 @@ impl<T> BufferVec<T> {
     }
 }
 
-impl<T> Default for BufferVec<T> {
+impl<T> Default for SameVec<T> {
     fn default() -> Self {
-        BufferVec { elements: Vec::new() }
+        SameVec { elements: Vec::new() }
     }
 }
 
