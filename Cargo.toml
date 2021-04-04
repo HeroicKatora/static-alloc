@@ -4,5 +4,6 @@ members = [
 	"exit-stack",
 	"fill",
 	"static-alloc",
+	"unsize",
 	"without-alloc",
 ]

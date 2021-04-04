@@ -21,11 +21,11 @@
 
 mod layout;
 mod local;
-mod unsize;
 pub mod util;
 
 pub use crate::layout::{Layout, NonZeroLayout};
 pub use crate::local::{AllocTime, Allocation, LocalAlloc};
 #[allow(deprecated)]
 pub use crate::local::Invariant;
-pub use crate::unsize::{Coercion, CoerceUnsize, CoerciblePtr};
+// Re-export for convenience.
+pub use unsize::{Coercion, CoerceUnsize, CoerciblePtr};

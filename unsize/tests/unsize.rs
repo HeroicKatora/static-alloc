@@ -1,5 +1,4 @@
-
-use alloc_traits::{Coercion, CoerceUnsize};
+use unsize::{Coercion, CoerceUnsize};
 
 #[test]
 fn any() {

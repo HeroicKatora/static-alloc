@@ -1,0 +1,18 @@
+[package]
+name = "unsize"
+version = "1.0.0-beta"
+description = "A stable alternative to CoerceUnsize"
+authors = ["Andreas Molzer <andreas.molzer@gmx.de>"]
+edition = "2018"
+license = "MIT"
+documentation = "https://docs.rs/unsize"
+repository = "https://github.com/HeroicKatora/static-alloc"
+categories = ["embedded", "no-std"]
+
+[dependencies]
+
+[build-dependencies]
+autocfg = "1"
+
+[package.metadata.docs.rs]
+all-features = true
