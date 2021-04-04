@@ -12,6 +12,10 @@
 //! conversion correctly. The _using_ this function is safe and enables any particular user-defined
 //! pointer wrapper to safely transform itself. Note that for a limited selection of standard
 //! traits we can even go so far as offer pre-built converters that are safe to use in general.
+// Copyright 2019-2021 Andreas Molzer
+#![no_std]
+#![deny(missing_docs)]
+
 #![allow(unused_unsafe)] // Err on the side of caution.
 use core::alloc::Layout;
 
@@ -97,7 +101,7 @@ impl<T, U: ?Sized> Coercion<T, U> {
     /// # Usage
     ///
     /// ```
-    /// use alloc_traits::Coercion;
+    /// use unsize::Coercion;
     /// use core::fmt::Debug;
     ///
     /// let c: Coercion<u32, dyn Debug> = unsafe {
@@ -150,7 +154,7 @@ coerce_to_dyn_trait!(
     /// # Usage
     ///
     /// ```
-    /// use alloc_traits::{Coercion, CoerceUnsize};
+    /// use unsize::{Coercion, CoerceUnsize};
     /// use core::any::Any;
     ///
     /// fn generic<T: Any>(ptr: &T) -> &dyn Any {
@@ -166,7 +170,7 @@ coerce_to_dyn_trait!(
     /// # Usage
     ///
     /// ```
-    /// use alloc_traits::{Coercion, CoerceUnsize};
+    /// use unsize::{Coercion, CoerceUnsize};
     /// use core::fmt::Debug;
     ///
     /// fn generic<T: Debug>(ptr: &T) -> &dyn Debug {
@@ -182,7 +186,7 @@ coerce_to_dyn_trait!(
     /// # Usage
     ///
     /// ```
-    /// use alloc_traits::{Coercion, CoerceUnsize};
+    /// use unsize::{Coercion, CoerceUnsize};
     /// use core::fmt::Display;
     ///
     /// fn generic<T: Display>(ptr: &T) -> &dyn Display {
@@ -199,7 +203,7 @@ impl<T, const N: usize> Coercion<[T; N], [T]> {
     /// # Usage
     ///
     /// ```
-    /// use alloc_traits::{Coercion, CoerceUnsize};
+    /// use unsize::{Coercion, CoerceUnsize};
     /// use core::fmt::Display;
     ///
     /// fn generic<T>(ptr: &[T; 2]) -> &[T] {
@@ -265,7 +269,7 @@ coerce_to_dyn_fn!(A,B,C,D,E);
 coerce_to_dyn_fn!(A,B,C,D,E,G);
 
 /// ```
-/// use alloc_traits::{Coercion, CoerceUnsize};
+/// use unsize::{Coercion, CoerceUnsize};
 /// fn arg0<F: 'static + FnOnce()>(fptr: &F) -> &dyn FnOnce() {
 ///     fptr.unsize(Coercion::<_, dyn FnOnce()>::to_fn_once())
 /// }
@@ -382,7 +386,7 @@ unsafe fn unsize_with<T, U: ?Sized>(
 /// Ensure that using `CoerceUnsize` does not import as_sized_ptr.
 ///
 /// ```compile_fail
-/// use alloc_traits::CoerceUnsize;
+/// use unsize::CoerceUnsize;
 /// use core::ptr::NonNull;
 ///
 /// let ptr = NonNull::from(&2u32);

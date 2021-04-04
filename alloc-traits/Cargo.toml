@@ -9,14 +9,11 @@ documentation = "https://docs.rs/static-alloc"
 repository = "https://github.com/HeroicKatora/static-alloc"
 categories = ["embedded", "memory-management", "no-std"]
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [lib]
 name = "alloc_traits"
 
 [dependencies]
-
-[build-dependencies]
-autocfg = "1"
+unsize = { version = "1.0.0-beta", path = "../unsize" }
 
 [package.metadata.docs.rs]
 all-features = true
