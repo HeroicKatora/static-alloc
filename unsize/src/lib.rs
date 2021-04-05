@@ -397,3 +397,32 @@ extern {}
 
 #[cfg(test)]
 mod tests;
+
+/// Non-`unsafe` [`struct@Coercion`] constructor for arbitrary trait bounds.
+///
+/// # Example
+// (and test!)
+///
+/// ```rust
+/// use unsize::Coercion;
+///
+/// trait MyFancyTrait { /* … */ }
+///
+/// fn generic<T: MyFancyTrait>(ptr: &T) -> &dyn MyFancyTrait {
+///     ptr.unsize(Coercion!(to dyn MyFancyTrait))
+/// }
+/// ```
+#[macro_export]
+macro_rules! Coercion {
+    (to dyn $($bounds:tt)*) => (
+        #[allow(unused_unsafe)] unsafe {
+            $crate::Coercion::new({
+                #[allow(unused_parens)]
+                fn coerce (p: *mut (impl $($bounds)*)) -> *mut (dyn $($bounds)*) {
+                    p
+                }
+                coerce
+            })
+        }
+    );
+}
