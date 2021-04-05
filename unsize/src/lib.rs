@@ -114,17 +114,22 @@ impl<T, U: ?Sized> Coercion<T, U> {
 }
 
 macro_rules! coerce_to_dyn_trait {
-    ($(#[$attr:meta])* fn $name:ident() -> $trait_type:path) => {
-        impl<'lt, T: $trait_type + 'lt> Coercion<T, dyn $trait_type + 'lt> {
+    (
+        $(for <$($generics:ident),* $(,)?>)?
+        $(#[$attr:meta])* fn $name:ident() -> $trait_type:path
+    ) => {
+        impl<'lt, T: $trait_type + 'lt, $($($generics),*)?>
+            Coercion<T, dyn $trait_type + 'lt>
+        {
             $(#[$attr])*
             pub fn $name() -> Self {
-                fn coerce_to_that_type<'lt, T: $trait_type + 'lt>(
+                fn coerce_to_that_type<'lt, T: $trait_type + 'lt, $($($generics),*)?>(
                     ptr: *const T
                 ) -> *const (dyn $trait_type + 'lt) {
                     ptr
                 }
 
-                Coercion { coerce: coerce_to_that_type }
+                unsafe { Coercion::new(coerce_to_that_type) }
             }
         }
     };
@@ -214,58 +219,60 @@ impl<T, const N: usize> Coercion<[T; N], [T]> {
         fn coerce<T, const N: usize>(
             ptr: *const [T; N]
         ) -> *const [T] { ptr }
-        Coercion { coerce }
+        unsafe { Coercion::new(coerce) }
     }
 }
 
 macro_rules! coerce_to_dyn_fn {
-    ($($arg:ident),*) => {
+    (
+        $(#![$attr:meta])?
+        $($arg:ident),*
+    ) => {
         coerce_to_dyn_fn!(
+            $(#![$attr])?
             @<$($arg,)*>:
             (dyn Fn($($arg,)*) -> T + 'lt),
             (dyn FnMut($($arg,)*) -> T + 'lt),
             (dyn FnOnce($($arg,)*) -> T + 'lt)
         );
     };
-    (@<$($arg:ident,)*>: $dyn:ty, $dyn_mut:ty, $dyn_once:ty) => {
-        impl<'lt, T, $($arg,)* F: 'lt + Fn($($arg,)*) -> T> Coercion<F, $dyn> {
+    (
+        $(#![$attr:meta])?
+        @<$($arg:ident,)*>: $dyn:ty, $dyn_mut:ty, $dyn_once:ty
+    ) => {
+        coerce_to_dyn_trait! { for<Ret, $($arg),*>
+            $(#[$attr])?
             /// Create a coercer that unsizes to a dynamically dispatched function.
-            pub fn to_fn() -> Self {
-                fn coerce<'lt, T, $($arg,)* F: 'lt + Fn($($arg,)*) -> T>(
-                    ptr: *const F
-                ) -> *const $dyn { ptr }
-                Coercion { coerce }
-            }
+            ///
+            /// This is implemented for function arities up to the shown one
+            /// (other methods / impls are hidden in the docs for readability)
+            fn to_fn() -> Fn($($arg),*) -> Ret
         }
-
-        impl<'lt, T, $($arg,)* F: 'lt + FnMut($($arg,)*) -> T> Coercion<F, $dyn_mut> {
+        coerce_to_dyn_trait! { for<Ret, $($arg),*>
+            $(#[$attr])?
             /// Create a coercer that unsizes to a dynamically dispatched mutable function.
-            pub fn to_fn_once() -> Self {
-                fn coerce<'lt, T, $($arg,)* F: 'lt + FnMut($($arg,)*) -> T>(
-                    ptr: *const F
-                ) -> *const $dyn_mut { ptr }
-                Coercion { coerce }
-            }
+            ///
+            /// This is implemented for function arities up to the shown one
+            /// (other methods / impls are hidden in the docs for readability)
+            fn to_fn_mut() -> FnMut($($arg),*) -> Ret
         }
-
-        impl<'lt, T, $($arg,)* F: 'lt + FnOnce($($arg,)*) -> T> Coercion<F, $dyn_once> {
+        coerce_to_dyn_trait! { for<Ret, $($arg),*>
+            $(#[$attr])?
             /// Create a coercer that unsizes to a dynamically dispatched once function.
-            pub fn to_fn_once() -> Self {
-                fn coerce<'lt, T, $($arg,)* F: 'lt + FnOnce($($arg,)*) -> T>(
-                    ptr: *const F
-                ) -> *const $dyn_once { ptr }
-                Coercion { coerce }
-            }
+            ///
+            /// This is implemented for function arities up to the shown one
+            /// (other methods / impls are hidden in the docs for readability)
+            fn to_fn_once() -> FnOnce($($arg),*) -> Ret
         }
     };
 }
 
-coerce_to_dyn_fn!();
-coerce_to_dyn_fn!(A);
-coerce_to_dyn_fn!(A,B);
-coerce_to_dyn_fn!(A,B,C);
-coerce_to_dyn_fn!(A,B,C,D);
-coerce_to_dyn_fn!(A,B,C,D,E);
+coerce_to_dyn_fn!(#![doc(hidden)] );
+coerce_to_dyn_fn!(#![doc(hidden)] A);
+coerce_to_dyn_fn!(#![doc(hidden)] A,B);
+coerce_to_dyn_fn!(#![doc(hidden)] A,B,C);
+coerce_to_dyn_fn!(#![doc(hidden)] A,B,C,D);
+coerce_to_dyn_fn!(#![doc(hidden)] A,B,C,D,E);
 coerce_to_dyn_fn!(A,B,C,D,E,G);
 
 /// ```
@@ -276,7 +283,7 @@ coerce_to_dyn_fn!(A,B,C,D,E,G);
 /// fn arg1<F: 'static + FnOnce(u32)>(fptr: &F) -> &dyn FnOnce(u32) {
 ///     fptr.unsize(Coercion::<_, dyn FnOnce(u32)>::to_fn_once())
 /// }
-/// fn arg6<F: 'static + FnOnce(u32,u32,u32,u32,u32,u32)>(fptr: &F) 
+/// fn arg6<F: 'static + FnOnce(u32,u32,u32,u32,u32,u32)>(fptr: &F)
 ///     -> &dyn FnOnce(u32,u32,u32,u32,u32,u32)
 /// {
 ///     fptr.unsize(Coercion::<_, dyn FnOnce(u32,u32,u32,u32,u32,u32)>::to_fn_once())
