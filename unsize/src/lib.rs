@@ -30,7 +30,7 @@ mod impls {
     unsafe impl<'lt, T, U: ?Sized + 'lt> CoerciblePtr<U> for &'lt T {
         type Pointee = T;
         type Output = &'lt U;
-        fn as_sized_ptr(&self) -> *mut T {
+        fn as_sized_ptr(self: &mut &'lt T) -> *mut T {
             (*self) as *const T as *mut T
         }
         unsafe fn replace_ptr(self, new: *mut U) -> &'lt U {
@@ -42,8 +42,8 @@ mod impls {
     unsafe impl<'lt, T, U: ?Sized + 'lt> CoerciblePtr<U> for &'lt mut T {
         type Pointee = T;
         type Output = &'lt mut U;
-        fn as_sized_ptr(&self) -> *mut T {
-            (*self) as *const T as *mut T
+        fn as_sized_ptr(self: &mut &'lt mut T) -> *mut T {
+            &mut **self
         }
         unsafe fn replace_ptr(self, new: *mut U) -> &'lt mut U {
             unsafe { &mut *new }
@@ -52,13 +52,13 @@ mod impls {
 
     unsafe impl<Ptr, U : ?Sized, T> CoerciblePtr<U> for core::pin::Pin<Ptr>
     where
-        Ptr: CoerciblePtr<U> + core::ops::Deref<Target=T>,
-        Ptr::Output: core::ops::Deref<Target=U>,
+        Ptr: CoerciblePtr<U> + core::ops::DerefMut<Target=T>,
+        Ptr::Output: core::ops::DerefMut<Target=U>,
     {
         type Pointee = T;
         type Output = core::pin::Pin<Ptr::Output>;
-        fn as_sized_ptr(&self) -> *mut Self::Pointee {
-            self.as_ref().get_ref() as *const Self::Pointee as *mut _
+        fn as_sized_ptr(&mut self) -> *mut Self::Pointee {
+            unsafe { self.as_mut().get_unchecked_mut() }
         }
         unsafe fn replace_ptr(self, new: *mut U) -> Self::Output {
             let inner = core::pin::Pin::into_inner_unchecked(self);
@@ -70,7 +70,7 @@ mod impls {
     unsafe impl<T, U: ?Sized> CoerciblePtr<U> for core::ptr::NonNull<T> {
         type Pointee = T;
         type Output = NonNull<U>;
-        fn as_sized_ptr(&self) -> *mut T {
+        fn as_sized_ptr(&mut self) -> *mut T {
             self.as_ptr()
         }
         unsafe fn replace_ptr(self, new: *mut U) -> NonNull<U> {
@@ -309,7 +309,7 @@ pub unsafe trait CoerciblePtr<U: ?Sized>: Sized {
     /// The output type when unsizing the pointee to `U`.
     type Output;
     /// Get the raw inner pointer.
-    fn as_sized_ptr(&self) -> *mut Self::Pointee;
+    fn as_sized_ptr(&mut self) -> *mut Self::Pointee;
     /// Replace the container inner pointer with an unsized version.
     /// # Safety
     /// The caller guarantees that the replacement is the same pointer, just a fat pointer variant
@@ -324,7 +324,7 @@ pub trait CoerceUnsize<U: ?Sized>: CoerciblePtr<U> {
     /// See [`CoerciblePtr::unsize_with`][unsize_with] for details.
     ///
     /// [unsize_with]: struct.CoerciblePtr.html#method.unsize_with
-    fn unsize<F>(self, with: Coercion<Self::Pointee, U, F>) -> Self::Output
+    fn unsize<F>(mut self, with: Coercion<Self::Pointee, U, F>) -> Self::Output
     where
         F : FnOnce(*const Self::Pointee) -> *const U,
     {
