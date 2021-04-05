@@ -17,7 +17,10 @@
 #![deny(missing_docs)]
 
 #![allow(unused_unsafe)] // Err on the side of caution.
-use core::alloc::Layout;
+use core::{
+    alloc::Layout,
+    marker::PhantomData,
+};
 
 mod impls {
     //! Safety: Provenance is always the same as self, pointer target is simply passed through.
@@ -77,21 +80,23 @@ mod impls {
     }
 }
 
-/// Enables the unsizing of a sized pointer.
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
-#[repr(transparent)]
-pub struct Coercion<T, U: ?Sized> {
-    coerce: fn(*const T) -> *const U,
+unbounded_derives! {
+    #![helper = Coercion_]
+    #[doc = r#"
+        Enables the unsizing of a sized pointer.
+    "#]
+    #[derive(Clone, Copy, PartialEq, Eq, Hash)]
+    #[repr(C)]
+    pub struct Coercion[T, U : ?Sized, F : FnOnce(*const T) -> *const U = fn(*const T) -> *const U] {
+        pub(crate) coerce: F,
+        pub(crate) _phantom: PhantomData<fn(*const T) -> *const U>,
+    }
 }
 
-/// A stateful coercion of a sized pointer.
-#[derive(Clone, Copy)]
-#[repr(transparent)]
-pub struct CoercionWith<'lt, T, U: ?Sized> {
-    coerce: &'lt dyn Fn(*const T) -> *const U,
-}
-
-impl<T, U: ?Sized> Coercion<T, U> {
+impl<F, T, U: ?Sized> Coercion<T, U, F>
+where
+    F : FnOnce(*const T) -> *const U,
+{
     /// Construct a new coercer.
     ///
     /// # Safety
@@ -108,8 +113,8 @@ impl<T, U: ?Sized> Coercion<T, U> {
     ///     Coercion::new(|x| x)
     /// };
     /// ```
-    pub unsafe fn new(coerce: fn(*const T) -> *const U) -> Self {
-        Coercion { coerce }
+    pub unsafe fn new(coerce: F) -> Self {
+        Coercion { coerce, _phantom: PhantomData }
     }
 }
 
@@ -322,20 +327,10 @@ pub trait CoerceUnsize<U: ?Sized>: CoerciblePtr<U> {
     /// See [`CoerciblePtr::unsize_with`][unsize_with] for details.
     ///
     /// [unsize_with]: struct.CoerciblePtr.html#method.unsize_with
-    fn unsize(self, with: Coercion<Self::Pointee, U>) -> Self::Output {
-        unsafe {
-            let ptr = self.as_sized_ptr();
-            let new_ptr = unsize_with(ptr, with.coerce);
-            self.replace_ptr(new_ptr)
-        }
-    }
-
-    /// Convert a pointer, as if with unsize coercion.
-    ///
-    /// See [`CoerciblePtr::unsize_with`][unsize_with] for details.
-    ///
-    /// [unsize_with]: struct.CoerciblePtr.html#method.unsize_with
-    fn unsize_with(self, with: CoercionWith<Self::Pointee, U>) -> Self::Output {
+    fn unsize<F>(self, with: Coercion<Self::Pointee, U, F>) -> Self::Output
+    where
+        F : FnOnce(*const Self::Pointee) -> *const U,
+    {
         unsafe {
             let ptr = self.as_sized_ptr();
             let new_ptr = unsize_with(ptr, with.coerce);
@@ -362,11 +357,13 @@ where
 /// itself.
 unsafe fn unsize_with<T, U: ?Sized>(
     ptr: *mut T,
-    with: impl Fn(*const T) -> *const U,
+    with: impl FnOnce(*const T) -> *const U,
 ) -> *mut U {
     let mut raw_unsized = with(ptr) as *mut U;
 
-    debug_assert_eq!(Layout::for_value(&raw_unsized), Layout::new::<[usize; 2]>(),
+    // Not a debug assert since it hopefully monomorphizes to a no-op (or an
+    // unconditional panic should multi-trait objects end up happening).
+    assert_eq!(Layout::for_value(&raw_unsized), Layout::new::<[usize; 2]>(),
         "Unexpected layout of unsized pointer.");
     debug_assert_eq!(raw_unsized as *const u8 as usize, ptr as usize,
         "Unsize coercion seemingly changed the pointer base");
@@ -400,3 +397,47 @@ unsafe fn unsize_with<T, U: ?Sized>(
 /// let _ = ptr.as_sized_ptr();
 /// ```
 extern {}
+
+macro_rules! unbounded_derives {(
+    #![helper = $StructName_:ident]
+    #[doc = $doc:expr]
+    $( #[$attr:meta] )*
+    $pub:vis struct $StructName:ident [$($generics:tt)*] {
+        $(
+            $( #[$field_attr:meta] )*
+            $field_pub:vis
+            $field_name:ident : $FieldTy:ty
+        ),* $(,)?
+    }
+) => (
+    #[cfg(doc)]
+    #[doc = $doc]
+    $( #[$attr] )*
+    $pub struct $StructName< $($generics)* > {
+        $(
+            $( #[$field_attr] )*
+            $field_pub
+            $field_name: $FieldTy,
+        )*
+    }
+
+    #[cfg(not(doc))]
+    $( #[$attr] )*
+    #[allow(missing_docs, nonstandard_style)]
+    $pub struct $StructName_< $($field_name),* > {
+        $(
+            $( #[$field_attr] )*
+            $field_pub
+            $field_name: $field_name
+        ),*
+    }
+
+    #[cfg(not(doc))]
+    #[allow(type_alias_bounds)]
+    #[doc = $doc]
+    $pub type $StructName<$($generics)*> = $StructName_< $($FieldTy),* >;
+)}
+pub(crate) use unbounded_derives;
+
+#[cfg(test)]
+mod tests;
