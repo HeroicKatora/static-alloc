@@ -47,10 +47,10 @@ mod impls {
         }
     }
 
-    unsafe impl<Ptr, U, T> CoerciblePtr<U> for core::pin::Pin<Ptr>
+    unsafe impl<Ptr, U : ?Sized, T> CoerciblePtr<U> for core::pin::Pin<Ptr>
     where
         Ptr: CoerciblePtr<U> + core::ops::Deref<Target=T>,
-        Ptr::Output: core::ops::Deref<Target=T>,
+        Ptr::Output: core::ops::Deref<Target=U>,
     {
         type Pointee = T;
         type Output = core::pin::Pin<Ptr::Output>;
