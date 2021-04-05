@@ -34,6 +34,7 @@ mod impls {
             (*self) as *const T as *mut T
         }
         unsafe fn replace_ptr(self, new: *mut U) -> &'lt U {
+            // See the mutable version.
             unsafe { &*super::unsize_with(self as *const T as *mut T, |_| new) }
         }
     }
@@ -46,6 +47,13 @@ mod impls {
             &mut **self
         }
         unsafe fn replace_ptr(self, new: *mut U) -> &'lt mut U {
+            // (Explanation should apply to the const version too).
+            // We want the `new` pointer with provenance of `self`. This is because in
+            // `as_sized_ptr` we had only borrowed the mutably reference and the usage of passing
+            // it as argument to this method has invalidated this borrow.
+            // We reuse `unsize_with` to set `self` as the pointer value in `new`. This is okay
+            // because `new` should already be an unsized version, we merely make use of its
+            // builtin provenance copy operation.
             unsafe { &mut *super::unsize_with(self, |_| new) }
         }
     }
