@@ -34,6 +34,7 @@ assert_impls! {
         // The pointees' lack of bounds should not make `Coercion` lack the bounds too.
         T, U : ?Sized,
         F :
+            FnOnce(*const T) -> *const U +
             Copy +
             Clone +
             PartialEq +

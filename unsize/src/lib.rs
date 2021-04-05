@@ -80,18 +80,15 @@ mod impls {
     }
 }
 
-unbounded_derives! {
-    #![helper = Coercion_]
-    #[doc = r#"
-        Enables the unsizing of a sized pointer.
-    "#]
-    #[derive(Clone, Copy, PartialEq, Eq, Hash)]
-    #[repr(C)]
-    pub struct Coercion[T, U : ?Sized, F : FnOnce(*const T) -> *const U = fn(*const T) -> *const U] {
-        pub(crate) coerce: F,
-        pub(crate) _phantom: PhantomData<fn(*const T) -> *const U>,
-    }
+/// Enables the unsizing of a sized pointer.
+#[repr(C)]
+pub struct Coercion<T, U : ?Sized, F : FnOnce(*const T) -> *const U = fn(*const T) -> *const U> {
+    pub(crate) coerce: F,
+    pub(crate) _phantom: PhantomData<fn(*const T) -> *const U>,
 }
+
+/// Common trait impls for `Coercion`.
+mod coercion_impls;
 
 impl<F, T, U: ?Sized> Coercion<T, U, F>
 where
@@ -397,47 +394,6 @@ unsafe fn unsize_with<T, U: ?Sized>(
 /// let _ = ptr.as_sized_ptr();
 /// ```
 extern {}
-
-macro_rules! unbounded_derives {(
-    #![helper = $StructName_:ident]
-    #[doc = $doc:expr]
-    $( #[$attr:meta] )*
-    $pub:vis struct $StructName:ident [$($generics:tt)*] {
-        $(
-            $( #[$field_attr:meta] )*
-            $field_pub:vis
-            $field_name:ident : $FieldTy:ty
-        ),* $(,)?
-    }
-) => (
-    #[cfg(doc)]
-    #[doc = $doc]
-    $( #[$attr] )*
-    $pub struct $StructName< $($generics)* > {
-        $(
-            $( #[$field_attr] )*
-            $field_pub
-            $field_name: $FieldTy,
-        )*
-    }
-
-    #[cfg(not(doc))]
-    $( #[$attr] )*
-    #[allow(missing_docs, nonstandard_style)]
-    $pub struct $StructName_< $($field_name),* > {
-        $(
-            $( #[$field_attr] )*
-            $field_pub
-            $field_name: $field_name
-        ),*
-    }
-
-    #[cfg(not(doc))]
-    #[allow(type_alias_bounds)]
-    #[doc = $doc]
-    $pub type $StructName<$($generics)*> = $StructName_< $($FieldTy),* >;
-)}
-pub(crate) use unbounded_derives;
 
 #[cfg(test)]
 mod tests;
