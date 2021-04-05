@@ -34,7 +34,7 @@ mod impls {
             (*self) as *const T as *mut T
         }
         unsafe fn replace_ptr(self, new: *mut U) -> &'lt U {
-            unsafe { &*new }
+            unsafe { &*super::unsize_with(self as *const T as *mut T, |_| new) }
         }
     }
 
@@ -46,7 +46,7 @@ mod impls {
             &mut **self
         }
         unsafe fn replace_ptr(self, new: *mut U) -> &'lt mut U {
-            unsafe { &mut *new }
+            unsafe { &mut *super::unsize_with(self, |_| new) }
         }
     }
 
