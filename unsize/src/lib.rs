@@ -60,7 +60,7 @@ mod impls {
 
     unsafe impl<Ptr, U : ?Sized, T> CoerciblePtr<U> for core::pin::Pin<Ptr>
     where
-        Ptr: CoerciblePtr<U> + core::ops::DerefMut<Target=T>,
+        Ptr: CoerciblePtr<U, Pointee=T> + core::ops::DerefMut<Target=T>,
         Ptr::Output: core::ops::DerefMut<Target=U>,
     {
         type Pointee = T;
