@@ -1,6 +1,6 @@
 [package]
 name = "unsize"
-version = "1.0.0-beta.1"
+version = "1.0.0"
 description = "A stable alternative to CoerceUnsize"
 authors = ["Andreas Molzer <andreas.molzer@gmx.de>"]
 edition = "2018"
