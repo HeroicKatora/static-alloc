@@ -85,7 +85,7 @@ pub struct Box<'a, T: ?Sized> {
 unsafe impl<'a, T, U: ?Sized> CoerciblePtr<U> for Box<'a, T> {
     type Pointee = T;
     type Output = Box<'a, U>;
-    fn as_sized_ptr(&self) -> *mut T {
+    fn as_sized_ptr(&mut self) -> *mut T {
         self.inner.as_ptr()
     }
     unsafe fn replace_ptr(self, new: *mut U) -> Box<'a, U> {

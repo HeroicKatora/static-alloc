@@ -976,7 +976,7 @@ impl<T: ?Sized> Copy for UninitView<'_, T> { }
 unsafe impl<'a, T, U: ?Sized> CoerciblePtr<U> for UninitView<'a, T> {
     type Pointee = T;
     type Output = UninitView<'a, U>;
-    fn as_sized_ptr(&self) -> *mut T {
+    fn as_sized_ptr(&mut self) -> *mut T {
         self.as_ptr() as *mut T
     }
     unsafe fn replace_ptr(self, new: *mut U) -> UninitView<'a, U> {
@@ -992,7 +992,7 @@ unsafe impl<'a, T, U: ?Sized> CoerciblePtr<U> for Uninit<'a, T> {
     type Pointee = T;
     type Output = Uninit<'a, U>;
 
-    fn as_sized_ptr(&self) -> *mut T {
+    fn as_sized_ptr(&mut self) -> *mut T {
         self.as_ptr()
     }
 
