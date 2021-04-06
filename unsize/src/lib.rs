@@ -412,7 +412,7 @@ mod tests;
 // (and test!)
 ///
 /// ```rust
-/// use unsize::Coercion;
+/// use unsize::{Coercion, CoerceUnsize};
 ///
 /// trait MyFancyTrait { /* … */ }
 ///
@@ -426,7 +426,7 @@ macro_rules! Coercion {
         #[allow(unused_unsafe)] unsafe {
             $crate::Coercion::new({
                 #[allow(unused_parens)]
-                fn coerce (p: *mut (impl $($bounds)*)) -> *mut (dyn $($bounds)*) {
+                fn coerce<'lt> (p: *const (impl $($bounds)* + 'lt)) -> *const (dyn $($bounds)* + 'lt) {
                     p
                 }
                 coerce
