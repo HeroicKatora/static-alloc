@@ -19,6 +19,7 @@
 #![allow(unused_unsafe)] // Err on the side of caution.
 use core::{
     alloc::Layout,
+    future::Future,
     marker::PhantomData,
 };
 
@@ -354,6 +355,54 @@ coerce_to_dyn_trait! {
     /// }
     /// ```
     fn to_iterator() -> Iterator<Item=I>
+}
+
+coerce_to_dyn_trait! {
+    for<I,>
+    /// Create a coercer that unsizes to a dynamically dispatched future.
+    ///
+    /// This is implemented for all iterator types. It can type-erase the concrete type to wrap an
+    /// otherwise unnameable adapter in a custom smart pointer, to store it within a struct.
+    ///
+    /// # Usage
+    ///
+    /// ```
+    /// # use core::future::Future;
+    /// # use unsize::CoerciblePtr;
+    /// // A non-coercible box, for demonstration purposes
+    /// struct MyBox<T: ?Sized>(Box<T>);
+    ///
+    /// unsafe impl<'lt, T, U: ?Sized + 'lt> CoerciblePtr<U> for MyBox<T> {
+    ///     // …
+    /// #   type Pointee = T;
+    /// #   type Output = MyBox<U>;
+    /// #   fn as_sized_ptr(self: &mut MyBox<T>) -> *mut T {
+    /// #       (&mut *self.0) as *mut T
+    /// #   }
+    /// #   unsafe fn replace_ptr(self, new: *mut U) -> MyBox<U> {
+    /// #       let raw: *mut T = Box::into_raw(self.0);
+    /// #       let raw: *mut U = raw.replace_ptr(new);
+    /// #       MyBox(Box::from_raw(raw))
+    /// #   }
+    /// }
+    /// # impl<T> MyBox<T> {
+    /// #    pub fn new(val: T) -> Self { MyBox(std::boxed::Box::new(val)) }
+    /// # }
+    ///
+    /// use unsize::{Coercion, CoerceUnsize};
+    /// use core::fmt::Display;
+    ///
+    /// fn maybe_empty<T: 'static>(val: T) -> MyBox<dyn Future<Output=T>> {
+    ///     if core::mem::size_of::<T>() % 2 == 0 {
+    ///         MyBox::new(core::future::pending())
+    ///             .unsize(Coercion::to_future())
+    ///     } else {
+    ///         MyBox::new(core::future::ready(val))
+    ///             .unsize(Coercion::to_future())
+    ///     }
+    /// }
+    /// ```
+    fn to_future() -> Future<Output=I>
 }
 
 /// ```
