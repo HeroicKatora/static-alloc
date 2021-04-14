@@ -309,6 +309,53 @@ coerce_to_dyn_fn!(#![doc(hidden)] A,B,C,D);
 coerce_to_dyn_fn!(#![doc(hidden)] A,B,C,D,E);
 coerce_to_dyn_fn!(A,B,C,D,E,G);
 
+coerce_to_dyn_trait! {
+    for<I,>
+    /// Create a coercer that unsizes to a dynamically dispatched iterator.
+    ///
+    /// This is implemented for all iterator types. It can type-erase the concrete type to wrap an
+    /// otherwise unnameable adapter in a custom smart pointer, to store it within a struct.
+    ///
+    /// # Usage
+    ///
+    /// ```
+    /// # use unsize::CoerciblePtr;
+    /// // A non-coercible box, for demonstration purposes
+    /// struct MyBox<T: ?Sized>(Box<T>);
+    ///
+    /// unsafe impl<'lt, T, U: ?Sized + 'lt> CoerciblePtr<U> for MyBox<T> {
+    ///     // …
+    /// #   type Pointee = T;
+    /// #   type Output = MyBox<U>;
+    /// #   fn as_sized_ptr(self: &mut MyBox<T>) -> *mut T {
+    /// #       (&mut *self.0) as *mut T
+    /// #   }
+    /// #   unsafe fn replace_ptr(self, new: *mut U) -> MyBox<U> {
+    /// #       let raw: *mut T = Box::into_raw(self.0);
+    /// #       let raw: *mut U = raw.replace_ptr(new);
+    /// #       MyBox(Box::from_raw(raw))
+    /// #   }
+    /// }
+    /// # impl<T> MyBox<T> {
+    /// #    pub fn new(val: T) -> Self { MyBox(std::boxed::Box::new(val)) }
+    /// # }
+    ///
+    /// use unsize::{Coercion, CoerceUnsize};
+    /// use core::fmt::Display;
+    ///
+    /// fn maybe_empty<T: Clone>(item: &T) -> MyBox<dyn Iterator<Item=T> + '_> {
+    ///     if core::mem::size_of::<T>() % 2 == 0 {
+    ///         MyBox::new(core::iter::empty())
+    ///             .unsize(Coercion::to_iterator())
+    ///     } else {
+    ///         MyBox::new(core::iter::repeat(item.clone()))
+    ///             .unsize(Coercion::to_iterator())
+    ///     }
+    /// }
+    /// ```
+    fn to_iterator() -> Iterator<Item=I>
+}
+
 /// ```
 /// use unsize::{Coercion, CoerceUnsize};
 /// fn arg0<F: 'static + FnOnce()>(fptr: &F) -> &dyn FnOnce() {
