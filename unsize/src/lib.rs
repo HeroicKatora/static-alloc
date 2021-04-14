@@ -27,6 +27,30 @@ mod impls {
     use core::ptr::NonNull;
     use super::CoerciblePtr;
 
+    unsafe impl<T, U: ?Sized> CoerciblePtr<U> for *const T {
+        type Pointee = T;
+        type Output = *const U;
+        fn as_sized_ptr(self: &mut *const T) -> *mut T {
+            (*self) as *const T as *mut T
+        }
+        unsafe fn replace_ptr(self, new: *mut U) -> *const U {
+            // See the mutable version.
+            super::unsize_with(self as *mut T, |_| new)
+        }
+    }
+
+    unsafe impl<T, U: ?Sized> CoerciblePtr<U> for *mut T {
+        type Pointee = T;
+        type Output = *mut U;
+        fn as_sized_ptr(self: &mut *mut T) -> *mut T {
+            *self
+        }
+        unsafe fn replace_ptr(self, new: *mut U) -> *mut U {
+            // See the mutable version.
+            super::unsize_with(self, |_| new)
+        }
+    }
+
     unsafe impl<'lt, T, U: ?Sized + 'lt> CoerciblePtr<U> for &'lt T {
         type Pointee = T;
         type Output = &'lt U;
