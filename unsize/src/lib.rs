@@ -446,7 +446,7 @@ pub unsafe trait CoerciblePtr<U: ?Sized>: Sized {
 }
 
 /// An extension trait using `CoerciblePtr` for a safe interface.
-pub trait CoerceUnsize<U: ?Sized>: CoerciblePtr<U> {
+pub trait CoerceUnsized<U: ?Sized>: CoerciblePtr<U> {
     /// Convert a pointer, as if with unsize coercion.
     ///
     /// See [`CoerciblePtr::unsize_with`][unsize_with] for details.
@@ -463,6 +463,12 @@ pub trait CoerceUnsize<U: ?Sized>: CoerciblePtr<U> {
         }
     }
 }
+
+/// A deprecated alias for the `CoerceUnsized` trait.
+/// It will be hidden in a few releases from now.
+#[doc(no_inline)]
+#[deprecated = "This was initially misnamed"]
+pub use self::CoerceUnsized as CoerceUnsize;
 
 impl<T, U: ?Sized> CoerceUnsize<U> for T
 where
