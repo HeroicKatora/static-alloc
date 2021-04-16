@@ -33,7 +33,7 @@ type. To provide custom unsize coercions to your own `?Sized` wrapper type you
 can provide a safe constructor for `Coercion`.
 
 As a user of a `unsize`-enabled pointer type, you should import the
-`CoerceUnsize` extension trait and the `Coercion` marker type. Then create an
+`CoerceUnsized` extension trait and the `Coercion` marker type. Then create an
 instance of `Coercion` to 'coerce' the pointee type of a smart pointer. The
 type defines a number of safe constructors and an `unsafe` escape hatch. The
 crate further defines a macro that provides safe coercion to other unsized

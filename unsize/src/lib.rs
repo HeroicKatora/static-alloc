@@ -194,7 +194,7 @@ coerce_to_dyn_trait!(
     /// # Usage
     ///
     /// ```
-    /// use unsize::{Coercion, CoerceUnsize};
+    /// use unsize::{Coercion, CoerceUnsized};
     /// use core::any::Any;
     ///
     /// fn generic<T: Any>(ptr: &T) -> &dyn Any {
@@ -210,7 +210,7 @@ coerce_to_dyn_trait!(
     /// # Usage
     ///
     /// ```
-    /// use unsize::{Coercion, CoerceUnsize};
+    /// use unsize::{Coercion, CoerceUnsized};
     /// use core::fmt::Debug;
     ///
     /// fn generic<T: Debug>(ptr: &T) -> &dyn Debug {
@@ -226,7 +226,7 @@ coerce_to_dyn_trait!(
     /// # Usage
     ///
     /// ```
-    /// use unsize::{Coercion, CoerceUnsize};
+    /// use unsize::{Coercion, CoerceUnsized};
     /// use core::fmt::Display;
     ///
     /// fn generic<T: Display>(ptr: &T) -> &dyn Display {
@@ -243,7 +243,7 @@ impl<T, const N: usize> Coercion<[T; N], [T]> {
     /// # Usage
     ///
     /// ```
-    /// use unsize::{Coercion, CoerceUnsize};
+    /// use unsize::{Coercion, CoerceUnsized};
     /// use core::fmt::Display;
     ///
     /// fn generic<T>(ptr: &[T; 2]) -> &[T] {
@@ -341,7 +341,7 @@ coerce_to_dyn_trait! {
     /// #    pub fn new(val: T) -> Self { MyBox(std::boxed::Box::new(val)) }
     /// # }
     ///
-    /// use unsize::{Coercion, CoerceUnsize};
+    /// use unsize::{Coercion, CoerceUnsized};
     /// use core::fmt::Display;
     ///
     /// fn maybe_empty<T: Clone>(item: &T) -> MyBox<dyn Iterator<Item=T> + '_> {
@@ -389,7 +389,7 @@ coerce_to_dyn_trait! {
     /// #    pub fn new(val: T) -> Self { MyBox(std::boxed::Box::new(val)) }
     /// # }
     ///
-    /// use unsize::{Coercion, CoerceUnsize};
+    /// use unsize::{Coercion, CoerceUnsized};
     /// use core::fmt::Display;
     ///
     /// fn maybe_empty<T: 'static>(val: T) -> MyBox<dyn Future<Output=T>> {
@@ -406,7 +406,7 @@ coerce_to_dyn_trait! {
 }
 
 /// ```
-/// use unsize::{Coercion, CoerceUnsize};
+/// use unsize::{Coercion, CoerceUnsized};
 /// fn arg0<F: 'static + FnOnce()>(fptr: &F) -> &dyn FnOnce() {
 ///     fptr.unsize(Coercion::<_, dyn FnOnce()>::to_fn_once())
 /// }
@@ -470,7 +470,7 @@ pub trait CoerceUnsized<U: ?Sized>: CoerciblePtr<U> {
 #[deprecated = "This was initially misnamed"]
 pub use self::CoerceUnsized as CoerceUnsize;
 
-impl<T, U: ?Sized> CoerceUnsize<U> for T
+impl<T, U: ?Sized> CoerceUnsized<U> for T
 where
     T: CoerciblePtr<U>
 {}
@@ -518,10 +518,10 @@ unsafe fn unsize_with<T, U: ?Sized>(
     raw_unsized
 }
 
-/// Ensure that using `CoerceUnsize` does not import as_sized_ptr.
+/// Ensure that using `CoerceUnsized` does not import as_sized_ptr.
 ///
 /// ```compile_fail
-/// use unsize::CoerceUnsize;
+/// use unsize::CoerceUnsized;
 /// use core::ptr::NonNull;
 ///
 /// let ptr = NonNull::from(&2u32);
@@ -538,7 +538,7 @@ mod tests;
 // (and test!)
 ///
 /// ```rust
-/// use unsize::{Coercion, CoerceUnsize};
+/// use unsize::{Coercion, CoerceUnsized};
 ///
 /// trait MyFancyTrait { /* … */ }
 ///
