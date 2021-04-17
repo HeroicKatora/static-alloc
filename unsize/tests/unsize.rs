@@ -1,4 +1,4 @@
-use unsize::{Coercion, CoerceUnsize};
+use unsize::{Coercion, CoerceUnsized};
 
 #[test]
 fn any() {
