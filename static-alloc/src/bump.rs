@@ -770,16 +770,12 @@ impl<T> Bump<T> {
         assert!(expect_consumed <= new_consumed);
         assert!(new_consumed <= mem::size_of::<T>());
 
-        #[allow(deprecated)]
-        let observed = self.consumed.compare_and_swap(
+        self.consumed.compare_exchange(
             expect_consumed,
             new_consumed,
-            Ordering::SeqCst);
-        if expect_consumed == observed {
-            Ok(())
-        } else {
-            Err(observed)
-        }
+            Ordering::SeqCst,
+            Ordering::SeqCst,
+        ).map(drop)
     }
 }
 
