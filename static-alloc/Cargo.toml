@@ -10,8 +10,12 @@ repository = "https://github.com/HeroicKatora/static-alloc"
 readme = "Readme.md"
 categories = ["embedded", "memory-management", "no-std"]
 
+[package.metadata.docs.rs]
+all-features = true
+
 [dependencies]
 alloc-traits = { path = "../alloc-traits", version = "0.1.0" }
+atomic-polyfill = { version = "0.1.2", optional = true }
 
 [features]
 alloc = []
@@ -21,6 +25,7 @@ nightly_try_reserve = []
 # Enables the `unsync::Chain` module. Note that this is explicitly outside the
 # SemVer stability guarantees!
 nightly_chain = ["alloc"]
+polyfill = ["atomic-polyfill"]
 
 # Tests that test `Bump` as GlobalAlloc. Must be in a separate test each.
 [[test]]
@@ -42,6 +47,3 @@ required-features = ["DISABLED"]
 name = "unsync"
 path = "tests/unsync.rs"
 required-features = ["alloc"]
-
-[package.metadata.docs.rs]
-all-features = true
