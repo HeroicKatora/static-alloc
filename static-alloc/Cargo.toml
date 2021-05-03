@@ -25,6 +25,8 @@ nightly_try_reserve = []
 # Enables the `unsync::Chain` module. Note that this is explicitly outside the
 # SemVer stability guarantees!
 nightly_chain = ["alloc"]
+# Enables the use of the `atomic-polyfill` crate to support targets without
+# native atomic CAS operations
 polyfill = ["atomic-polyfill"]
 
 # Tests that test `Bump` as GlobalAlloc. Must be in a separate test each.

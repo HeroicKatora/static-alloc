@@ -1,3 +1,7 @@
+# Unreleased
+
+- Added support for `thumbv6m` targets through use of `atomic-polyfill`
+
 # v0.2.2
 
 - Added a synchronous Bump allocator. Its interface is similar to the
