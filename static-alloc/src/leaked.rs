@@ -1,4 +1,5 @@
 //! This module contains an owning wrapper of a leaked struct.
+use core::pin::Pin;
 use alloc_traits::AllocTime;
 
 use core::{
@@ -277,6 +278,76 @@ impl<'ctx, T: ?Sized> LeakBox<'ctx, T> {
         // * The LeakBox type guarantees this is initialized and not mutably aliased.
         // * For the lifetime 'a which is at most 'ctx.
         unsafe { &mut *pointer }
+    }
+}
+
+impl<T: 'static> LeakBox<'static, T> {
+    /// Pin an instance that's leaked for the remaining program runtime.
+    ///
+    /// After calling this method the value can only safely be referenced mutably if it is `Unpin`,
+    /// otherwise it is only accessible behind a `Pin`. Note that this does _not_ imply that the
+    /// `Drop` glue, or explicit `Drop`-impl, is guaranteed to run.
+    ///
+    /// # Usage
+    ///
+    /// A decent portion of futures must be _pinned_ before the can be awaited inside another
+    /// future. In particular this is required for self-referential futures that store pointers
+    /// into their own object's memory. This is the case for the future type of an `asnyc fn` if
+    /// there are potentially any stack references when it is suspended/waiting on another future.
+    /// Consider this example:
+    ///
+    /// ```compile_fail
+    /// use static_alloc::{Bump, leaked::LeakBox}; 
+    ///
+    /// async fn example(x: usize) -> usize {
+    ///     // Holding reference across yield point.
+    ///     // This requires pinning to run this future.
+    ///     let y = &x;
+    ///     core::future::ready(()).await;
+    ///     *y
+    /// }
+    ///
+    /// static POOL: Bump<[usize; 128]> = Bump::uninit();
+    /// let mut future = POOL.leak_box(example(0))
+    ///     .expect("Enough space for small async fn");
+    ///
+    /// let usage = move || async {
+    /// // error[E0277]: `GenFuture<[static generator@src/leaked.rs …]>` cannot be unpinned
+    ///     let _ = (&mut *future).await;
+    /// };
+    /// ```
+    ///
+    /// This method can be used to pin instances allocated from a global pool without requiring the
+    /// use of a macro or unsafe on the caller's part. Now, with the correct usage of `into_pin`:
+    ///
+    /// ```compile_fail
+    /// use static_alloc::{Bump, leaked::LeakBox}; 
+    ///
+    /// async fn example(x: usize) -> usize {
+    ///     // Holding reference across yield point.
+    ///     // This requires pinning to run this future.
+    ///     let y = &x;
+    ///     core::future::ready(()).await;
+    ///     *y
+    /// }
+    ///
+    /// static POOL: Bump<[usize; 128]> = Bump::uninit();
+    /// let future = POOL.leak_box(example(0))
+    ///     .expect("Enough space for small async fn");
+    ///
+    /// // PIN this future!
+    /// let mut future = LeakBox::into_pin(future);
+    ///
+    /// let usage = move || async {
+    ///     let _ = future.as_mut().await;
+    /// };
+    /// ```
+    pub fn into_pin(this: Self) -> Pin<Self> {
+        // SAFETY:
+        // * This memory is valid for `'static` duration, independent of the fate of `this` and
+        //   even when it is forgotten. This trivially implies that any Drop is called before the
+        //   memory is invalidated, as required by `Pin`.
+        unsafe { Pin::new_unchecked(this) }
     }
 }
 
