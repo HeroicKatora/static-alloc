@@ -8,7 +8,12 @@ use core::alloc::{GlobalAlloc, Layout};
 use core::cell::UnsafeCell;
 use core::mem::{self, MaybeUninit};
 use core::ptr::{NonNull, null_mut};
+
+#[cfg(not(feature = "polyfill"))]
 use core::sync::atomic::{AtomicUsize, Ordering};
+
+#[cfg(feature = "polyfill")]
+use atomic_polyfill::{AtomicUsize, Ordering};
 
 use crate::leaked::LeakBox;
 use alloc_traits::{AllocTime, LocalAlloc, NonZeroLayout};
@@ -765,15 +770,12 @@ impl<T> Bump<T> {
         assert!(expect_consumed <= new_consumed);
         assert!(new_consumed <= mem::size_of::<T>());
 
-        let observed = self.consumed.compare_and_swap(
+        self.consumed.compare_exchange(
             expect_consumed,
             new_consumed,
-            Ordering::SeqCst);
-        if expect_consumed == observed {
-            Ok(())
-        } else {
-            Err(observed)
-        }
+            Ordering::SeqCst,
+            Ordering::SeqCst,
+        ).map(drop)
     }
 }
 
@@ -853,7 +855,7 @@ unsafe impl<T> GlobalAlloc for Bump<T> {
     ) -> *mut u8 {
         let current = NonZeroLayout::from_layout(current.into()).unwrap();
         // As guaranteed, `new_size` is greater than 0.
-        let new_size = core::num::NonZeroUsize::new_unchecked(new_size); 
+        let new_size = core::num::NonZeroUsize::new_unchecked(new_size);
 
         let target = match layout_reallocated(current, new_size) {
             Some(target) => target,
@@ -916,7 +918,7 @@ unsafe impl<'alloc, T> LocalAlloc<'alloc> for Bump<T> {
         layout: NonZeroLayout,
     ) -> Option<alloc_traits::Allocation<'alloc>> {
         if alloc.ptr.as_ptr() as usize % layout.align() == 0
-            && alloc.layout.size() >= layout.size() 
+            && alloc.layout.size() >= layout.size()
         {
             // Obvious fit, nothing to do.
             return Some(alloc_traits::Allocation {
