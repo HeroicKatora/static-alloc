@@ -4,7 +4,8 @@
 //! guaranteed is your program's image in memory as provided by the loader. Possible use cases are
 //! OS-less development, embedded, bootloaders (even stage0/1 maybe, totally untested).
 //!
-//! ## Usage
+//!
+//! ## Usage – Global allocator
 //!
 //! ```rust
 //! use static_alloc::Bump;
@@ -20,6 +21,13 @@
 //!         .unwrap_or_else(|_| panic!("Runtime allocated before main"));
 //! }
 //! ```
+//!
+//! You can find more detailed examples in the `doc` module:
+//!
+//! * [The readme](doc/readme/index.html)
+//! * [Usage as a global allocator](doc/global_allocator/index.html)
+//! * [Usage as a static allocator](doc/static_allocator/index.html)
+//! * [Safe pinning of static tasks](doc/pinned/index.html)
 //!
 //! ## Why the name?
 //!
@@ -51,11 +59,19 @@ pub mod unsync;
 // MIT License
 //
 // Copyright (c) 2018 Guillaume Gomez
+#[cfg(doc)]
 macro_rules! insert_as_doc {
-    { $content:expr } => {
-        #[doc = $content] extern { }
+    { $content:expr, $name:ident } => {
+        #[doc = $content] pub mod $name { }
     }
 }
 
-// Provides the README.md as doc, to ensure the example works!
-insert_as_doc!(include_str!("../Readme.md"));
+/// A module containing extended documentation and examples.
+#[cfg(doc)]
+pub mod doc {
+    // Provides the README.md as doc, to ensure the example works!
+    insert_as_doc!(include_str!("../Readme.md"), e0_readme);
+    insert_as_doc!(include_str!("doc/global_allocator.md"), e1_global_allocator);
+    insert_as_doc!(include_str!("doc/static_allocator.md"), e2_static_allocator);
+    insert_as_doc!(include_str!("doc/pinned.md"), e3_pinned);
+}
