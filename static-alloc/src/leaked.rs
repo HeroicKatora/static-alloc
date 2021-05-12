@@ -311,7 +311,7 @@ impl<T: 'static> LeakBox<'static, T> {
     /// let mut future = POOL.leak_box(example(0))
     ///     .expect("Enough space for small async fn");
     ///
-    /// let usage = move || async {
+    /// let usage = async move {
     /// // error[E0277]: `GenFuture<[static generator@src/leaked.rs …]>` cannot be unpinned
     ///     let _ = (&mut *future).await;
     /// };
@@ -320,7 +320,7 @@ impl<T: 'static> LeakBox<'static, T> {
     /// This method can be used to pin instances allocated from a global pool without requiring the
     /// use of a macro or unsafe on the caller's part. Now, with the correct usage of `into_pin`:
     ///
-    /// ```compile_fail
+    /// ```
     /// use static_alloc::{Bump, leaked::LeakBox}; 
     ///
     /// async fn example(x: usize) -> usize {
@@ -338,7 +338,7 @@ impl<T: 'static> LeakBox<'static, T> {
     /// // PIN this future!
     /// let mut future = LeakBox::into_pin(future);
     ///
-    /// let usage = move || async {
+    /// let usage = async move {
     ///     let _ = future.as_mut().await;
     /// };
     /// ```
