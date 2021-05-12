@@ -2,7 +2,7 @@
 
 [![Crates.io Status](https://img.shields.io/crates/v/static-alloc.svg)](https://crates.io/crates/static-alloc)
 [![Docs.rs Status](https://docs.rs/static-alloc/badge.svg)](https://docs.rs/static-alloc/)
-[![License](https://img.shields.io/badge/license-MIT-blue.svg)](https://raw.githubusercontent.com/HeroicKatora/static-alloc/LICENSE)
+[![License](https://img.shields.io/badge/license-Zlib-blue.svg)](https://raw.githubusercontent.com/HeroicKatora/static-alloc/master/LICENSE.ZLIB)
 [![CI Status](https://api.cirrus-ci.com/github/HeroicKatora/static-alloc.svg)](https://cirrus-ci.com/github/HeroicKatora/static-alloc)
 
 General purpose global allocator(s) with static, inline storage.
@@ -75,7 +75,7 @@ interface that is only somewhat usable.
 
 ## Additional
 
-This project is mainly MIT licensed. You may alternatively choose [the
-Unlicense](http://unlicense.org/) instead in which case the copyright headers
-signify the parts dedicated to the public domain to the fullest possible extent
-instead.
+This project is licensed under Zlib OR Apache-2.0 OR MIT. You may alternatively
+choose [the Unlicense](http://unlicense.org/) instead in which case the
+copyright headers signify the parts dedicated to the public domain to the
+fullest possible extent instead.
