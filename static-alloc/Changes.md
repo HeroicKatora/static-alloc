@@ -1,6 +1,11 @@
-# Unreleased
+# v0.2.3
 
 - Added support for `thumbv6m` targets through use of `atomic-polyfill`
+- Added `LeakBox::into_pin`, equivalent of `Box::into_pin`
+- Added dedicated guide-like documentation, explaining an example in more
+  detail. These are available when building `cargo doc` or more generally with
+  the doc configuration.
+- Fixed use of deprecated `compare_and_swap`.
 
 # v0.2.2
 
