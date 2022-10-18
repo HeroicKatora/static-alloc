@@ -90,7 +90,7 @@ pub struct MemBump {
     /// Note that the underlying memory is in one
     /// contiguous `UnsafeCell`, it's only represented
     /// here to make it easier to slice.
-    data: [UnsafeCell<MaybeUninit<u8>>],
+    data: UnsafeCell<[MaybeUninit<u8>]>,
 }
 
 impl<T> Bump<T> {
@@ -140,29 +140,39 @@ impl MemBump {
     }
 
     /// Returns the layout for an array with the size of `size`
-    fn data_layout(size: usize) -> Result<Layout, LayoutErr> {
+    fn data_layout(size: usize) -> Result<Layout, LayoutError> {
         Layout::array::<UnsafeCell<MaybeUninit<u8>>>(size)
     }
 
     /// Returns a layout for a MemBump where the length of the data field is `size`.
     /// This relies on the two functions defined above.
-    pub(crate) fn layout_from_size(size: usize) -> Result<Layout, LayoutErr> {
+    pub(crate) fn layout_from_size(size: usize) -> Result<Layout, LayoutError> {
         let data_tail = Self::data_layout(size)?;
         let (layout, _) = Self::header_layout().extend(data_tail)?;
         Ok(layout.pad_to_align())
     }
-}
 
-impl MemBump {
     /// Returns capacity of this `MemBump`.
     /// This is how many *bytes* can be allocated
     /// within this node.
-    pub(crate) const fn capacity(&self) -> usize {
-        self.data.len()
+    pub const fn capacity(&self) -> usize {
+        // Safety: just gets the pointer metadata `len` without invalidating any provenance,
+        // accepting the pointer use itself. This may be replaced by a safe `pointer::len` as soon
+        // as stable (#71146) and const which would avoid any pointer use.
+        unsafe { (*(self.data.get() as *const [UnsafeCell<u8>])).len() }
     }
-}
 
-impl MemBump {
+    /// Get a raw pointer to the data.
+    ///
+    /// Note that *any* use of the pointer must be done with extreme care as it may invalidate
+    /// existing references into the allocated region. Furthermore, bytes may not be initialized.
+    /// The length of the valid region is [`MemBump::capacity`].
+    ///
+    /// Prefer [`MemBump::get_unchecked`] for reconstructing a prior allocation.
+    pub fn data_ptr(&self) -> NonNull<u8> {
+        NonNull::new(self.data.get() as *mut u8).expect("from a reference")
+    }
+
     /// Allocate a region of memory.
     ///
     /// This is a safe alternative to [GlobalAlloc::alloc](#impl-GlobalAlloc).
@@ -310,24 +320,24 @@ impl MemBump {
         self.index.set(0)
     }
 
-    fn try_alloc(&self, layout: Layout)
-        -> Option<Allocation<'_>>
-    {
+    fn try_alloc(&self, layout: Layout) -> Option<Allocation<'_>> {
         let consumed = self.index.get();
         match self.try_alloc_at(layout, consumed) {
             Ok(alloc) => return Some(alloc),
             Err(Failure::Exhausted) => return None,
-            Err(Failure::Mismatch{ observed: _ }) => {
+            Err(Failure::Mismatch { observed: _ }) => {
                 unreachable!("Count in Cell concurrently modified, this UB")
             }
         }
     }
 
-    fn try_alloc_at(&self, layout: Layout, expect_consumed: usize)
-        -> Result<Allocation<'_>, Failure>
-    {
+    fn try_alloc_at(
+        &self,
+        layout: Layout,
+        expect_consumed: usize,
+    ) -> Result<Allocation<'_>, Failure> {
         assert!(layout.size() > 0);
-        let length = self.data.len();
+        let length = mem::size_of_val(&self.data);
         // We want to access contiguous slice, so cast to a single cell.
         let data: &UnsafeCell<[MaybeUninit<u8>]> =
             unsafe { &*(&self.data as *const _ as *const UnsafeCell<_>) };
