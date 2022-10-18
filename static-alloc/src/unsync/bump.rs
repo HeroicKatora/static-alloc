@@ -71,6 +71,12 @@ pub struct Bump<T> {
     // Warning: when changing the data layout, you must change `MemBump` as well.
 }
 
+/// An error used when one could not re-use raw memory for a bump allocator.
+#[derive(Debug)]
+pub struct FromMemError {
+    _inner: (),
+}
+
 /// A dynamically sized allocation block in which any type can be allocated.
 #[repr(C)]
 pub struct MemBump {
@@ -119,15 +125,103 @@ impl<T> Bump<T> {
 impl MemBump {
     /// Allocate some space to use for a bump allocator.
     pub fn new(capacity: usize) -> alloc::boxed::Box<Self> {
-        let layout = Self::layout_from_size(capacity)
-            .expect("Bad layout");
-        let ptr = NonNull::new(unsafe {
-                alloc::alloc::alloc(layout)
-            }).unwrap_or_else(|| {
-                alloc::alloc::handle_alloc_error(layout)
-            });
+        let layout = Self::layout_from_size(capacity).expect("Bad layout");
+        let ptr = NonNull::new(unsafe { alloc::alloc::alloc(layout) })
+            .unwrap_or_else(|| alloc::alloc::handle_alloc_error(layout));
         let ptr = ptr::slice_from_raw_parts_mut(ptr.as_ptr(), capacity);
         unsafe { alloc::boxed::Box::from_raw(ptr as *mut MemBump) }
+    }
+}
+
+impl MemBump {
+    /// Initialize a bump allocator from existing memory.
+    ///
+    /// # Usage
+    ///
+    /// ```
+    /// use core::mem::MaybeUninit;
+    /// use static_alloc::unsync::MemBump;
+    ///
+    /// let mut backing = [MaybeUninit::new(0); 128];
+    /// let alloc = MemBump::from_mem(&mut backing)?;
+    ///
+    /// # Ok::<(), static_alloc::unsync::FromMemError>(())
+    /// ```
+    pub fn from_mem(mem: &mut [MaybeUninit<u8>]) -> Result<LeakBox<'_, Self>, FromMemError> {
+        let header = Self::header_layout();
+        let offset = mem.as_ptr().align_offset(header.align());
+        // Align the memory for the header.
+        let mem = mem.get_mut(offset..).ok_or(FromMemError { _inner: () })?;
+        mem.get_mut(..header.size())
+            .ok_or(FromMemError { _inner: () })?
+            .fill(MaybeUninit::new(0));
+        Ok(unsafe { Self::from_mem_unchecked(mem) })
+    }
+
+    /// Construct a bump allocator from existing memory without reinitializing.
+    ///
+    /// This allows the caller to (unsafely) fallback to manual borrow checking of the memory
+    /// region between regions of allocator use.
+    ///
+    /// # Safety
+    ///
+    /// The memory must contain data that has been previously wrapped as a `MemBump`, exactly. The
+    /// only endorsed sound form of obtaining such memory is [`MemBump::into_mem`].
+    ///
+    /// Warning: Any _use_ of the memory will have invalidated all pointers to allocated objects,
+    /// more specifically the provenance of these pointers is no longer valid! You _must_ derive
+    /// new pointers based on their offsets.
+    pub unsafe fn from_mem_unchecked(mem: &mut [MaybeUninit<u8>]) -> LeakBox<'_, Self> {
+        let raw = Self::from_aligned_mem(mem);
+        LeakBox::from_mut_unchecked(raw)
+    }
+
+    /// Cast pre-initialized, aligned memory into a bump allocator.
+    #[allow(unused_unsafe)]
+    unsafe fn from_aligned_mem(mem: &mut [MaybeUninit<u8>]) -> &mut Self {
+        let header = Self::header_layout();
+        // debug_assert!(mem.len() >= header.size());
+        // debug_assert!(mem.as_ptr().align_offset(header.align()) == 0);
+
+        let datasize = mem.len() - header.size();
+        // Round down to the header alignment! The whole struct will occupy memory according to its
+        // natural alignment. We must be prepared fro the `pad_to_align` so to speak.
+        let datasize = datasize - datasize % header.align();
+        debug_assert!(Self::layout_from_size(datasize).map_or(false, |l| l.size() <= mem.len()));
+
+        let raw = mem.as_mut_ptr() as *mut u8;
+        // Turn it into a fat pointer with correct metadata for a `MemBump`.
+        // Safety:
+        // - The data is writable as we owned
+        unsafe { &mut *(ptr::slice_from_raw_parts_mut(raw, datasize) as *mut MemBump) }
+    }
+
+    /// Unwrap the memory owned by an unsized bump allocator.
+    ///
+    /// This releases the memory used by the allocator, similar to `Box::leak`, with the difference
+    /// of operating on unique references instead. It is necessary to own the bump allocator due to
+    /// internal state contained within the memory region that the caller can subsequently
+    /// invalidate.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use core::mem::MaybeUninit;
+    /// use static_alloc::unsync::MemBump;
+    ///
+    /// # let mut backing = [MaybeUninit::new(0); 128];
+    /// # let alloc = MemBump::from_mem(&mut backing)?;
+    /// let memory: &mut [_] = MemBump::into_mem(alloc);
+    /// assert!(memory.len() <= 128, "Not guaranteed to use all memory");
+    ///
+    /// // Safety: We have not touched the memory itself.
+    /// unsafe { MemBump::from_mem_unchecked(memory) };
+    /// # Ok::<(), static_alloc::unsync::FromMemError>(())
+    /// ```
+    pub fn into_mem<'lt>(this: LeakBox<'lt, Self>) -> &'lt mut [MaybeUninit<u8>] {
+        let layout = Layout::for_value(&*this);
+        let mem_pointer = LeakBox::into_raw(this) as *mut MaybeUninit<u8>;
+        unsafe { &mut *ptr::slice_from_raw_parts_mut(mem_pointer, layout.size()) }
     }
 
     /// Returns the layout for the `header` of a `MemBump`.
