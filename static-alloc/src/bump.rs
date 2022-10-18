@@ -800,8 +800,28 @@ impl<'alloc, T> Allocation<'alloc, T> {
     ///
     /// [`Bump::leak`]: struct.Bump.html#method.leak
     pub unsafe fn leak(self, val: T) -> &'alloc mut T {
+        // The pointer is not borrowed and valid as guaranteed by the caller.
         core::ptr::write(self.ptr.as_ptr(), val);
         &mut *self.ptr.as_ptr()
+    }
+
+    /// Write a value into the allocation and own it.
+    ///
+    /// ## Safety
+    ///
+    /// Must have been allocated for a layout that fits the layout of T previously. The pointer
+    /// must not be aliased.
+    ///
+    /// ## Usage
+    ///
+    /// Consider the alternative [`Bump::leak`] to safely allocate and directly leak a value.
+    ///
+    /// [`Bump::leak`]: struct.Bump.html#method.leak
+    pub unsafe fn boxed(self, val: T) -> LeakBox<'alloc, T> {
+        // The pointer is not aliased and valid as guaranteed by the caller.
+        core::ptr::write(self.ptr.as_ptr(), val);
+        // Safety: the instance is valid, was just initialized.
+        LeakBox::from_raw(self.ptr.as_ptr())
     }
 
     /// Convert this into a mutable reference to an uninitialized slot.
