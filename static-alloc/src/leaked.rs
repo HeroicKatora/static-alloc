@@ -1,4 +1,7 @@
 //! This module contains an owning wrapper of a leaked struct.
+//!
+//! FIXME(breaking): Naming. `leaking` implies the `Drop` of the value as well but we do the
+//! precise opposite.
 use core::pin::Pin;
 use alloc_traits::AllocTime;
 
@@ -110,6 +113,9 @@ impl<T> Alloca<T> {
 ///
 /// This is an owning pointer comparable to `Box`. It drops the contained value when it is dropped
 /// itself. The difference is that no deallocation logic is ever executed.
+///
+/// FIXME(non-breaking): the name is rather confusing. Maybe it should be `BumpBox` or `RefBox`?
+/// Not `StackBox` because the value's location in memory is not the defining feature.
 ///
 /// # Usage
 ///

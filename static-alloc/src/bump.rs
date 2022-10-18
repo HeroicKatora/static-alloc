@@ -183,6 +183,13 @@ pub struct LeakError<T> {
 /// the choice to the user. This is not yet encapsulate in a safe API yet `Level` makes it easy to
 /// reason about.
 ///
+/// See [`MemBump::get_unchecked`][crate::unsync::MemBump] for redeeming a value.
+///
+/// ## Unsound usage.
+///
+/// FIXME: the below is UB because we don't gain provenance over the complete array, only each
+/// individual element. Instead, we must derive a new pointer from the allocator!
+///
 /// ```
 /// # use core::slice;
 /// # use static_alloc::bump::{Level, Bump};
@@ -784,7 +791,8 @@ impl<'alloc, T> Allocation<'alloc, T> {
     ///
     /// ## Safety
     ///
-    /// Must have been allocated for a layout that fits the layout of T previously.
+    /// Must have been allocated for a layout that fits the layout of T previously. The pointer
+    /// must not be aliased.
     ///
     /// ## Usage
     ///

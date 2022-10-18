@@ -1,5 +1,5 @@
 use core::{
-    alloc::{Layout, LayoutErr},
+    alloc::{Layout, LayoutError},
     cell::{Cell, UnsafeCell},
     mem::{self, MaybeUninit},
     ops,
@@ -171,6 +171,8 @@ impl MemBump {
     /// This function will panic if the requested layout has a size of `0`. For the use in a
     /// `GlobalAlloc` this is explicitely forbidden to request and would allow any behaviour but we
     /// instead strictly check it.
+    ///
+    /// FIXME(breaking): this could well be a `Result<_, Failure>`.
     pub fn alloc(&self, layout: Layout) -> Option<NonNull<u8>> {
         Some(self.try_alloc(layout)?.ptr)
     }
@@ -183,9 +185,7 @@ impl MemBump {
     ///
     /// # Panics
     /// This function may panic if the provided `level` is from a different slab.
-    pub fn alloc_at(&self, layout: Layout, level: Level)
-        -> Result<NonNull<u8>, Failure>
-    {
+    pub fn alloc_at(&self, layout: Layout, level: Level) -> Result<NonNull<u8>, Failure> {
         let Allocation { ptr, .. } = self.try_alloc_at(layout, level.0)?;
         Ok(ptr)
     }
@@ -211,6 +211,8 @@ impl MemBump {
     ///
     /// assert_eq!(**cell_ref, 0xff);
     /// ```
+    ///
+    /// FIXME(breaking): this could well be a `Result<_, Failure>`.
     pub fn get<V>(&self) -> Option<Allocation<V>> {
         let alloc = self.try_alloc(Layout::new::<V>())?;
         Some(Allocation {
@@ -222,7 +224,8 @@ impl MemBump {
 
     /// Get an allocation for a specific type at a specific level.
     ///
-    /// See [`get`] for usage.
+    /// See [`get`] for usage. This can be used to ensure that data is contiguous in concurrent
+    /// access to the allocator.
     ///
     /// [`get`]: #method.get
     pub fn get_at<V>(&self, level: Level) -> Result<Allocation<V>, Failure> {
@@ -257,9 +260,15 @@ impl MemBump {
     ///
     /// assert!(data.try_borrow_mut().is_ok());
     /// ```
-    pub fn bump_box<'bump, T: 'bump>(&'bump self)
-        -> Result<LeakBox<'bump, MaybeUninit<T>>, Failure>
-    {
+    ///
+    /// FIXME(breaking): should return evidence of the level (observed, and post). Something
+    /// similar to `Allocation` but containing a `LeakBox<T>` instead? Introduce that to the sync
+    /// `Bump` allocator as well.
+    ///
+    /// FIXME(breaking): align with sync `Bump::get` (probably rename get to bump_box).
+    pub fn bump_box<'bump, T: 'bump>(
+        &'bump self,
+    ) -> Result<LeakBox<'bump, MaybeUninit<T>>, Failure> {
         let allocation = self.get_at(self.level())?;
         Ok(unsafe { allocation.uninit() }.into())
     }
@@ -277,9 +286,10 @@ impl MemBump {
     /// use a properly sized buffer instead and implement an iterative solution. (Left as an
     /// exercise to the reader, or see the examples for `without-alloc` where we use such a dynamic
     /// allocation with an inline vector as our stack).
-    pub fn bump_array<'bump, T: 'bump>(&'bump self, n: usize)
-        -> Result<LeakBox<'bump, [MaybeUninit<T>]>, Failure>
-    {
+    pub fn bump_array<'bump, T: 'bump>(
+        &'bump self,
+        n: usize,
+    ) -> Result<LeakBox<'bump, [MaybeUninit<T>]>, Failure> {
         let layout = Layout::array::<T>(n).map_err(|_| Failure::Exhausted)?;
         let raw = self.alloc(layout).ok_or(Failure::Exhausted)?;
         let slice = ptr::slice_from_raw_parts_mut(raw.cast().as_ptr(), n);
@@ -354,8 +364,10 @@ impl MemBump {
             Ok(()) => (),
             Err(observed) => {
                 // Someone else was faster, if you want it then recalculate again.
-                return Err(Failure::Mismatch { observed: Level(observed) });
-            },
+                return Err(Failure::Mismatch {
+                    observed: Level(observed),
+                });
+            }
         }
 
         let aligned = unsafe {
@@ -382,11 +394,6 @@ impl MemBump {
             Ok(())
         }
     }
-
-    /// 'Allocate' a ZST.
-    fn zst_fake_alloc<Z>(&self) -> Allocation<'_, Z> {
-        Allocation::for_zst(self.level())
-    }
 }
 
 impl<T> ops::Deref for Bump<T> {
@@ -397,8 +404,7 @@ impl<T> ops::Deref for Bump<T> {
         // Construct a point with the meta data of a slice to `data`, but pointing to the whole
         // struct instead. This meta data is later copied to the meta data of `bump` when cast.
         let ptr = self as *const Self as *const MaybeUninit<u8>;
-        let mem: *const [MaybeUninit<u8>] =
-            ptr::slice_from_raw_parts(ptr, data_layout.size());
+        let mem: *const [MaybeUninit<u8>] = ptr::slice_from_raw_parts(ptr, data_layout.size());
         // Now we have a pointer to MemBump with length meta data of the data slice.
         let bump = unsafe { &*(mem as *const MemBump) };
         debug_assert_eq!(from_layout, Layout::for_value(bump));
@@ -413,8 +419,7 @@ impl<T> ops::DerefMut for Bump<T> {
         // Construct a point with the meta data of a slice to `data`, but pointing to the whole
         // struct instead. This meta data is later copied to the meta data of `bump` when cast.
         let ptr = self as *mut Self as *mut MaybeUninit<u8>;
-        let mem: *mut [MaybeUninit<u8>] =
-            ptr::slice_from_raw_parts_mut(ptr, data_layout.size());
+        let mem: *mut [MaybeUninit<u8>] = ptr::slice_from_raw_parts_mut(ptr, data_layout.size());
         // Now we have a pointer to MemBump with length meta data of the data slice.
         let bump = unsafe { &mut *(mem as *mut MemBump) };
         debug_assert_eq!(from_layout, Layout::for_value(bump));
