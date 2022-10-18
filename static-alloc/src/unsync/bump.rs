@@ -341,6 +341,67 @@ impl MemBump {
         })
     }
 
+    /// Reacquire an allocation that has been performed previously.
+    ///
+    /// This call won't invalidate any other allocations.
+    ///
+    /// # Safety
+    ///
+    /// The caller must guarantee that no other pointers to this prior allocation are alive, or can
+    /// be created. This is guaranteed if the allocation was performed previously, has since been
+    /// discarded, and `reset` can not be called (for example, the caller holds a shared
+    /// reference).
+    ///
+    /// # Usage
+    ///
+    /// ```
+    /// # use core::mem::MaybeUninit;
+    /// # use static_alloc::unsync::MemBump;
+    /// # let mut backing = [MaybeUninit::new(0); 128];
+    /// # let alloc = MemBump::from_mem(&mut backing).unwrap();
+    /// // Create an initial allocation.
+    /// let level = alloc.level();
+    /// let allocation = alloc.get_at::<usize>(level)?;
+    /// let address = allocation.ptr.as_ptr() as usize;
+    /// // pretend to lose the owning pointer of the allocation.
+    /// let _ = { allocation };
+    ///
+    /// // Restore our access.
+    /// let renewed = unsafe { alloc.get_unchecked::<usize>(level) };
+    /// assert_eq!(address, renewed.ptr.as_ptr() as usize);
+    /// # Ok::<_, static_alloc::bump::Failure>(())
+    /// ```
+    ///
+    /// Critically, you can rely on *other* allocations to stay valid.
+    ///
+    /// ```
+    /// # use core::mem::MaybeUninit;
+    /// # use static_alloc::{leaked::LeakBox, unsync::MemBump};
+    /// # let mut backing = [MaybeUninit::new(0); 128];
+    /// # let alloc = MemBump::from_mem(&mut backing).unwrap();
+    /// let level = alloc.level();
+    /// alloc.get_at::<usize>(level)?;
+    ///
+    /// let other_val = alloc.bump_box()?;
+    /// let other_val = LeakBox::write(other_val, 0usize);
+    ///
+    /// let renew = unsafe { alloc.get_unchecked::<usize>(level) };
+    /// assert_eq!(*other_val, 0); // Not UB!
+    /// # Ok::<_, static_alloc::bump::Failure>(())
+    /// ```
+    pub unsafe fn get_unchecked<V>(&self, level: Level) -> Allocation<V> {
+        debug_assert!(level.0 < self.capacity());
+        let ptr = self.data_ptr().as_ptr();
+        // Safety: guaranteed by the caller.
+        let alloc = ptr.offset(level.0 as isize) as *mut V;
+
+        Allocation {
+            level,
+            lifetime: AllocTime::default(),
+            ptr: NonNull::new_unchecked(alloc),
+        }
+    }
+
     /// Allocate space for one `T` without initializing it.
     ///
     /// Note that the returned `MaybeUninit` can be unwrapped from `LeakBox`. Or you can store an
