@@ -237,6 +237,42 @@ impl<'ctx, T: ?Sized> LeakBox<'ctx, T> {
         }
     }
 
+    /// Wrap a mutable reference to a complex value as if it were owned.
+    ///
+    /// # Safety
+    ///
+    /// The value must be owned by the caller. That is, the mutable reference must not be used
+    /// after the `LeakBox` is dropped. In particular the value must not be dropped by the caller.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use core::mem::ManuallyDrop;
+    /// use static_alloc::leaked::LeakBox;
+    ///
+    /// fn with_stack_drop<T>(val: T) {
+    ///     let mut val = ManuallyDrop::new(val);
+    ///     // Safety:
+    ///     // - Shadows the variable, rendering the prior inaccessible.
+    ///     // - Dropping is now the responsibility of `LeakBox`.
+    ///     let val = unsafe { LeakBox::from_mut_unchecked(&mut *val) };
+    /// }
+    ///
+    /// // Demonstrate that it is correctly dropped.
+    /// let variable = core::cell::RefCell::new(0);
+    /// with_stack_drop(variable.borrow_mut());
+    /// assert!(variable.try_borrow_mut().is_ok());
+    /// ```
+    #[allow(unused_unsafe)]
+    pub unsafe fn from_mut_unchecked(val: &'ctx mut T) -> Self {
+        // SAFETY:
+        // * Is valid instance
+        // * Not aliased as by mut reference
+        // * Dropping soundness is guaranteed by the caller.
+        // * We don't invalidate any value, nor can the caller.
+        unsafe { LeakBox::from_raw(val) }
+    }
+
     /// Leak the instances as a mutable reference.
     ///
     /// After calling this method the value is no longer managed by `LeakBox`. Its Drop impl will
