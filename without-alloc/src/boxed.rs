@@ -5,7 +5,7 @@
 //! [`Box`]: struct.Box.html
 use core::{borrow, cmp, fmt, hash, mem, ops, ptr};
 use crate::uninit::Uninit;
-use alloc_traits::CoerciblePtr;
+use unsize::CoerciblePtr;
 
 /// An allocated instance of a type.
 ///
@@ -71,7 +71,7 @@ pub struct Box<'a, T: ?Sized> {
 ///
 /// ```
 /// # use without_alloc::boxed::Box;
-/// use alloc_traits::{Coercion, CoerceUnsize};
+/// use unsize::{Coercion, CoerceUnsize};
 /// use without_alloc::Uninit;
 /// use core::mem::MaybeUninit;
 ///
