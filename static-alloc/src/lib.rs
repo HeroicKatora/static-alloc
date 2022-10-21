@@ -2,8 +2,13 @@
 //!
 //! Provides an allocator for extremely resource constrained environments where the only memory
 //! guaranteed is your program's image in memory as provided by the loader. Possible use cases are
-//! OS-less development, embedded, bootloaders (even stage0/1 maybe, totally untested).
+//! OS-less development, embedded, bootloaders (even stage0/1).
 //!
+//! The allocator does not support meaningful deallocation but the whole allocator itself can be
+//! reset by mutable reference. This is useful for a local, single thread allocator. It's
+//! recommended to use the global instance to split resources _once_ at startup and then utilize
+//! multiple local allocators for actual working memory. See [`doc`] for some use case studies with
+//! examples.
 //!
 //! ## Usage – Global allocator
 //!
@@ -35,8 +40,7 @@
 //! dynamic values without accidentally exposing or using uninitialized memory. This allows
 //! obtaining `&'static mut T` instances which is handy if a struct requires a mutable reference
 //! but it is also required that this struct has `'static` lifetime bounds itself.
-
-// Copyright 2019 Andreas Molzer
+// Copyright 2019,2022 Andreas Molzer
 #![no_std]
 #![deny(missing_docs)]
 

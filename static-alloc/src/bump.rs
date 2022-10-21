@@ -183,6 +183,13 @@ pub struct LeakError<T> {
 /// the choice to the user. This is not yet encapsulate in a safe API yet `Level` makes it easy to
 /// reason about.
 ///
+/// See [`MemBump::get_unchecked`][crate::unsync::MemBump] for redeeming a value.
+///
+/// ## Unsound usage.
+///
+/// FIXME: the below is UB because we don't gain provenance over the complete array, only each
+/// individual element. Instead, we must derive a new pointer from the allocator!
+///
 /// ```
 /// # use core::slice;
 /// # use static_alloc::bump::{Level, Bump};
@@ -784,7 +791,8 @@ impl<'alloc, T> Allocation<'alloc, T> {
     ///
     /// ## Safety
     ///
-    /// Must have been allocated for a layout that fits the layout of T previously.
+    /// Must have been allocated for a layout that fits the layout of T previously. The pointer
+    /// must not be aliased.
     ///
     /// ## Usage
     ///
@@ -792,8 +800,28 @@ impl<'alloc, T> Allocation<'alloc, T> {
     ///
     /// [`Bump::leak`]: struct.Bump.html#method.leak
     pub unsafe fn leak(self, val: T) -> &'alloc mut T {
+        // The pointer is not borrowed and valid as guaranteed by the caller.
         core::ptr::write(self.ptr.as_ptr(), val);
         &mut *self.ptr.as_ptr()
+    }
+
+    /// Write a value into the allocation and own it.
+    ///
+    /// ## Safety
+    ///
+    /// Must have been allocated for a layout that fits the layout of T previously. The pointer
+    /// must not be aliased.
+    ///
+    /// ## Usage
+    ///
+    /// Consider the alternative [`Bump::leak`] to safely allocate and directly leak a value.
+    ///
+    /// [`Bump::leak`]: struct.Bump.html#method.leak
+    pub unsafe fn boxed(self, val: T) -> LeakBox<'alloc, T> {
+        // The pointer is not aliased and valid as guaranteed by the caller.
+        core::ptr::write(self.ptr.as_ptr(), val);
+        // Safety: the instance is valid, was just initialized.
+        LeakBox::from_raw(self.ptr.as_ptr())
     }
 
     /// Convert this into a mutable reference to an uninitialized slot.

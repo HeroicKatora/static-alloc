@@ -14,9 +14,8 @@ only memory guaranteed is your program's image in memory as provided by the
 loader. Possible use cases are OS-less development, embedded, bootloaders (even
 stage0/1).
 
-Possible use cases are OS-less development, embedded, bootloaders (even
-stage0/1 maybe, totally untested). The primary goals are similar to the
-standard library simplicity, and correctness, and minimal assumptions.
+The primary goals are similar to the standard library simplicity, and
+correctness, and minimal assumptions.
 
 ## Usage
 
