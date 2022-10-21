@@ -13,7 +13,6 @@ categories = ["embedded", "memory-management", "no-std"]
 name = "alloc_traits"
 
 [dependencies]
-unsize = { version = "1.0.0-beta.1", path = "../unsize" }
 
 [package.metadata.docs.rs]
 all-features = true

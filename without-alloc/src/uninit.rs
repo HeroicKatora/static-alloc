@@ -23,7 +23,7 @@ use core::alloc::Layout;
 use core::marker::PhantomData;
 
 use crate::boxed::Box;
-use alloc_traits::CoerciblePtr;
+use unsize::CoerciblePtr;
 
 /// Points to an uninitialized place but would otherwise be a valid reference.
 ///
