@@ -8,7 +8,12 @@ use core::alloc::{GlobalAlloc, Layout};
 use core::cell::UnsafeCell;
 use core::mem::{self, MaybeUninit};
 use core::ptr::{NonNull, null_mut};
+
+#[cfg(not(feature = "polyfill"))]
 use core::sync::atomic::{AtomicUsize, Ordering};
+
+#[cfg(feature = "polyfill")]
+use atomic_polyfill::{AtomicUsize, Ordering};
 
 use crate::leaked::LeakBox;
 use alloc_traits::{AllocTime, LocalAlloc, NonZeroLayout};
@@ -177,6 +182,13 @@ pub struct LeakError<T> {
 /// once. Other similar interface often require an internal locking mechanism but `Level` leaves
 /// the choice to the user. This is not yet encapsulate in a safe API yet `Level` makes it easy to
 /// reason about.
+///
+/// See [`MemBump::get_unchecked`][crate::unsync::MemBump] for redeeming a value.
+///
+/// ## Unsound usage.
+///
+/// FIXME: the below is UB because we don't gain provenance over the complete array, only each
+/// individual element. Instead, we must derive a new pointer from the allocator!
 ///
 /// ```
 /// # use core::slice;
@@ -765,15 +777,12 @@ impl<T> Bump<T> {
         assert!(expect_consumed <= new_consumed);
         assert!(new_consumed <= mem::size_of::<T>());
 
-        let observed = self.consumed.compare_and_swap(
+        self.consumed.compare_exchange(
             expect_consumed,
             new_consumed,
-            Ordering::SeqCst);
-        if expect_consumed == observed {
-            Ok(())
-        } else {
-            Err(observed)
-        }
+            Ordering::SeqCst,
+            Ordering::SeqCst,
+        ).map(drop)
     }
 }
 
@@ -782,7 +791,8 @@ impl<'alloc, T> Allocation<'alloc, T> {
     ///
     /// ## Safety
     ///
-    /// Must have been allocated for a layout that fits the layout of T previously.
+    /// Must have been allocated for a layout that fits the layout of T previously. The pointer
+    /// must not be aliased.
     ///
     /// ## Usage
     ///
@@ -790,8 +800,28 @@ impl<'alloc, T> Allocation<'alloc, T> {
     ///
     /// [`Bump::leak`]: struct.Bump.html#method.leak
     pub unsafe fn leak(self, val: T) -> &'alloc mut T {
+        // The pointer is not borrowed and valid as guaranteed by the caller.
         core::ptr::write(self.ptr.as_ptr(), val);
         &mut *self.ptr.as_ptr()
+    }
+
+    /// Write a value into the allocation and own it.
+    ///
+    /// ## Safety
+    ///
+    /// Must have been allocated for a layout that fits the layout of T previously. The pointer
+    /// must not be aliased.
+    ///
+    /// ## Usage
+    ///
+    /// Consider the alternative [`Bump::leak`] to safely allocate and directly leak a value.
+    ///
+    /// [`Bump::leak`]: struct.Bump.html#method.leak
+    pub unsafe fn boxed(self, val: T) -> LeakBox<'alloc, T> {
+        // The pointer is not aliased and valid as guaranteed by the caller.
+        core::ptr::write(self.ptr.as_ptr(), val);
+        // Safety: the instance is valid, was just initialized.
+        LeakBox::from_raw(self.ptr.as_ptr())
     }
 
     /// Convert this into a mutable reference to an uninitialized slot.
@@ -853,7 +883,7 @@ unsafe impl<T> GlobalAlloc for Bump<T> {
     ) -> *mut u8 {
         let current = NonZeroLayout::from_layout(current.into()).unwrap();
         // As guaranteed, `new_size` is greater than 0.
-        let new_size = core::num::NonZeroUsize::new_unchecked(new_size); 
+        let new_size = core::num::NonZeroUsize::new_unchecked(new_size);
 
         let target = match layout_reallocated(current, new_size) {
             Some(target) => target,
@@ -916,7 +946,7 @@ unsafe impl<'alloc, T> LocalAlloc<'alloc> for Bump<T> {
         layout: NonZeroLayout,
     ) -> Option<alloc_traits::Allocation<'alloc>> {
         if alloc.ptr.as_ptr() as usize % layout.align() == 0
-            && alloc.layout.size() >= layout.size() 
+            && alloc.layout.size() >= layout.size()
         {
             // Obvious fit, nothing to do.
             return Some(alloc_traits::Allocation {

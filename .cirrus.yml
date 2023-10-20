@@ -52,6 +52,14 @@ miri_without_alloc_task:
     - cd without-alloc
     - rustup run nightly cargo-miri miri test
 
+miri_unsize_task:
+  container:
+    image: rustlang/rust:nightly
+  script:
+    - rustup component add --toolchain nightly miri
+    - cd unsize
+    - rustup run nightly cargo-miri miri test
+
 release_task:
   only_if: $CIRRUS_BRANCH =~ 'release-fill.*'
   container:
