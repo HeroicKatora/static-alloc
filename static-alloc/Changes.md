@@ -1,3 +1,7 @@
+# v0.2.5
+
+- Bump `atomic-polyfill` to `1`, as discovered during Debian packaging.
+
 # v0.2.4
 
 - The Safety Requirements for `Allocation::leak` have been refined. It's now
