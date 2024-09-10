@@ -13,7 +13,7 @@
 //! pointer wrapper to safely transform itself. Note that for a limited selection of standard
 //! traits we can even go so far as offer pre-built converters that are safe to use in general.
 // Copyright 2019-2021 Andreas Molzer
-#![no_std]
+#![cfg_attr(not(feature = "std"), no_std)]
 #![deny(missing_docs)]
 
 #![allow(unused_unsafe)] // Err on the side of caution.
@@ -22,6 +22,9 @@ use core::{
     future::Future,
     marker::PhantomData,
 };
+
+#[cfg(feature = "alloc")]
+extern crate alloc;
 
 mod impls {
     //! Safety: Provenance is always the same as self, pointer target is simply passed through.
@@ -110,6 +113,71 @@ mod impls {
             // Safety:
             NonNull::new_unchecked(new)
         }
+    }
+
+    #[cfg(feature = "alloc")]
+    mod alloc_impls {
+        use crate::CoerciblePtr;
+        use alloc::boxed::Box;
+        use alloc::rc::Rc;
+        use alloc::sync::Arc;
+        #[cfg(rustc_1_45)]
+        use alloc::rc::Weak as WeakRc;
+        #[cfg(rustc_1_45)]
+        use alloc::sync::Weak as WeakArc;
+
+        macro_rules! smart_ptr_to_from_raw {
+            (unsafe impl $tgt:ident) => (smart_ptr_to_from_raw! {
+                unsafe impl $tgt {
+                    fn as_sized_ptr(&mut self) -> *mut T {
+                        // Use deref to acquire pointer to self
+                        // NOTE: Turning this into an &mut T is UB if there is shared ownership
+                        (&**self) as *const T as *mut T
+                    }
+                }
+            });
+            (unsafe impl $tgt:ident { $($items:tt)* }) => {
+                unsafe impl<T, U: ?Sized> CoerciblePtr<U> for $tgt<T> {
+                    type Pointee = T;
+                    type Output = $tgt<U>;
+                    $($items)*
+                    unsafe fn replace_ptr(self, new: *mut U) -> $tgt<U> {
+                        unsafe {
+                            // SAFETY: Caller has guarenteed that `new` is
+                            // just an unsized version of the original
+                            //
+                            // Ownership is correctly transfered from `self` to result.
+                            // NOTE: Leaks memory if unsize_with panics
+                            $tgt::from_raw(crate::unsize_with($tgt::into_raw(self) as *mut T, |_| new))
+                        }
+                    }
+                }
+            }
+        }
+        smart_ptr_to_from_raw!(unsafe impl Box);
+        smart_ptr_to_from_raw!(unsafe impl Rc);
+        smart_ptr_to_from_raw!(unsafe impl Arc);
+        #[cfg(rustc_1_45)] // Weak::from_raw, Weak::as_ptr only on 1.45
+        smart_ptr_to_from_raw!(unsafe impl WeakRc {
+            fn as_sized_ptr(&mut self) -> *mut T {
+                // The safety of this implementation is subtle.
+                // If there are still strong references, everything works like Rc.
+                // If there are no strong references,
+                // the result of Weak::as_ptr is well-defined but dangling
+                //
+                // Furthermore, it is still safe to call
+                // Weak::from_raw even with a strong count of zero
+                // as long as we still own a weak reference
+                WeakRc::as_ptr(&*self) as *mut T
+            }
+        });
+        #[cfg(rustc_1_45)] // std::sync::Arc works same as std::rc::Arc
+        smart_ptr_to_from_raw!(unsafe impl WeakArc {
+            fn as_sized_ptr(&mut self) -> *mut T {
+                // Safety of this implementation is safe as for WeakRc
+                WeakArc::as_ptr(&*self) as *mut T
+            }
+        });
     }
 }
 

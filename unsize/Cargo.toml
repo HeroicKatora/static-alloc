@@ -12,6 +12,12 @@ categories = ["embedded", "no-std"]
 
 [dependencies]
 
+[features]
+# Implement CoerecePtr for `alloc` pointer types
+alloc = []
+# Implement Unsize for `std` pointer types
+std = ["alloc"]
+
 [build-dependencies]
 autocfg = "1"
 
