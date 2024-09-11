@@ -24,3 +24,33 @@ fn smart_ptrs() {
     check_debug(arbitrary_debug::<Rc<String>, Rc<dyn Debug>>(Rc::new(TEST_VAL.into())));
     check_debug(arbitrary_debug::<Arc<String>, Arc<dyn Debug>>(Arc::new(TEST_VAL.into())));
 }
+
+#[test]
+#[cfg(rustc_1_45)]
+fn smart_ptrs_weak() {
+    use std::rc::{Rc, Weak as WeakRc};
+    use std::sync::{Arc, Weak as WeakArc};
+    macro_rules! test_weak_ptr {
+        ($strong:ident, $weak:ident) => ({
+            {
+                let strong: $strong<String> = $strong::new(TEST_VAL.into());
+                {
+                    // coerce weak
+                    let weak = $strong::downgrade(&strong);
+                    let weak = arbitrary_debug::<$weak<String>, $weak<dyn Debug>>(weak);
+                    check_debug($weak::upgrade(&weak).unwrap());
+                }
+                {
+                    // coerce strong, then downgrade to dynamic weak
+                    let strong = arbitrary_debug::<$strong<String>, $strong<dyn Debug>>(strong);
+                    let weak: $weak<dyn Debug> = $strong::downgrade(&strong);
+                    check_debug($weak::upgrade(&weak).unwrap());
+                }
+            };
+            // Check dangling pointers
+            arbitrary_debug::<$weak<String>, $weak<dyn Debug>>($weak::new());
+        });
+    }
+    test_weak_ptr!(Rc, WeakRc);
+    test_weak_ptr!(Arc, WeakArc);
+}
