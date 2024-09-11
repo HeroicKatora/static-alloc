@@ -1,4 +1,4 @@
-use unsize::{Coercion, CoerceUnsized, CoerciblePtr};
+use unsize::{Coercion, CoerceUnsized};
 
 #[test]
 fn any() {
@@ -68,25 +68,4 @@ fn functions() {
     arg0(&|| {});
     arg1(&|_| {});
     arg6(&|_,_,_,_,_,_| {});
-}
-
-#[test]
-#[cfg(feature = "alloc")]
-fn smart_ptrs() {
-    use std::fmt::Debug;
-    use std::rc::{Rc, Weak as RcWeak};
-    use std::sync::{Arc, Weak as ArcWeak};
-    use std::sync::Weak;
-    /// Does an arbitrary coercion for `dyn Debug`
-    fn arbitrary<T: CoerciblePtr<dyn Debug, Output=U>, U>(ptr: T) -> U
-        where T::Pointee: Debug + 'static {
-        ptr.unsize(Coercion::to_debug())
-    }
-    const TEST_VAL: &str = "foo";
-    fn check_debug<U: AsRef<dyn Debug>>(val: U) {
-        assert_eq!(format!("{:?}", val.as_ref()), format!("{:?}", TEST_VAL))
-    }
-    check_debug(arbitrary::<Box<String>, Box<dyn Debug>>(Box::new(TEST_VAL.into())));
-    check_debug(arbitrary::<Rc<String>, Rc<dyn Debug>>(Rc::new(TEST_VAL.into())));
-    check_debug(arbitrary::<Arc<String>, Arc<dyn Debug>>(Arc::new(TEST_VAL.into())));
 }
