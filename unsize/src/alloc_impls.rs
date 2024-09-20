@@ -29,8 +29,13 @@ macro_rules! smart_ptr_to_from_raw {
                     // just an unsized version of the original
                     //
                     // Ownership is correctly transfered from `self` to result.
-                    // NOTE: Leaks memory if unsize_with panics
-                    $tgt::from_raw(crate::unsize_with($tgt::into_raw(self) as *mut T, |_| new))
+
+                    // Provenance transfered into `raw` as per each individual `into_raw`.
+                    let raw = $tgt::into_raw(self) as *mut T;
+                    // Provenance merged into `new` as per `replace_ptr`.
+                    let new: *mut U = <*mut T as CoerciblePtr<U>>::replace_ptr(raw, new);
+                    // Provenance transferred as per `from_raw`.
+                    $tgt::from_raw(new)
                 }
             }
         }
