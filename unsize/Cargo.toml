@@ -12,6 +12,10 @@ categories = ["embedded", "no-std"]
 
 [dependencies]
 
+[features]
+# Implement CoerecePtr for `alloc` pointer types
+alloc = []
+
 [build-dependencies]
 autocfg = "1"
 

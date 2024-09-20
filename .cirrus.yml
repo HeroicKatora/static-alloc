@@ -58,7 +58,7 @@ miri_unsize_task:
   script:
     - rustup component add --toolchain nightly miri
     - cd unsize
-    - rustup run nightly cargo-miri miri test
+    - rustup run nightly cargo-miri miri test --all-features
 
 release_task:
   only_if: $CIRRUS_BRANCH =~ 'release-fill.*'

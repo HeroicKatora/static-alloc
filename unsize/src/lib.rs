@@ -23,6 +23,12 @@ use core::{
     marker::PhantomData,
 };
 
+#[cfg(feature = "alloc")]
+extern crate alloc;
+
+#[cfg(feature = "alloc")]
+mod alloc_impls;
+
 mod impls {
     //! Safety: Provenance is always the same as self, pointer target is simply passed through.
     use core::ptr::NonNull;
