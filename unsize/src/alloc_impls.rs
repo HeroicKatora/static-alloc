@@ -50,13 +50,13 @@ smart_ptr_to_from_raw!(unsafe impl WeakRc {
         // Furthermore, it is still safe to call
         // Weak::from_raw even with a strong count of zero
         // as long as we still own a weak reference
-        WeakRc::as_ptr(&*self) as *mut T
+        WeakRc::as_ptr(self) as *mut T
     }
 });
 #[cfg(rustc_1_45)] // std::sync::Arc works same as std::rc::Arc
 smart_ptr_to_from_raw!(unsafe impl WeakArc {
     fn as_sized_ptr(&mut self) -> *mut T {
         // Safety of this implementation is safe as for WeakRc
-        WeakArc::as_ptr(&*self) as *mut T
+        WeakArc::as_ptr(self) as *mut T
     }
 });
